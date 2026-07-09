@@ -1,0 +1,656 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SD-WAN Network Triage Report</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/d3-sankey@0.12.3/dist/d3-sankey.min.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>{{.CSS}}</style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1><img src="data:image/png;base64,{{.LogoBase64}}" alt="Logo" style="width:32px;height:32px;object-fit:contain;vertical-align:middle;margin-right:10px;"> SD-WAN Network Triage Report</h1>
+            <p class="subtitle">Comprehensive Network Analysis</p>
+            <p class="meta">Generated: {{.GeneratedAt}} | File: {{.FileName}} | Packets: {{.PacketCount}}</p>
+        </div>
+
+        <div class="content">
+            <!-- Executive Summary -->
+            <div class="card">
+                <div class="card-header">
+                    <i class="fas fa-chart-line"></i>
+                    <h2>Executive Summary</h2>
+                </div>
+                <div class="card-body">
+                    {{if eq .HealthStatus "good"}}
+                    <div class="health-badge health-good">
+                        <i class="fas fa-check-circle"></i>&nbsp; Network Health: GOOD
+                    </div>
+                    {{else if eq .HealthStatus "warning"}}
+                    <div class="health-badge health-warning">
+                        <i class="fas fa-exclamation-triangle"></i>&nbsp; Network Health: WARNING
+                    </div>
+                    {{else}}
+                    <div class="health-badge health-critical">
+                        <i class="fas fa-times-circle"></i>&nbsp; Network Health: CRITICAL
+                    </div>
+                    {{end}}
+
+                    <div style="display: flex; align-items: center; gap: 30px; margin: 20px 0;">
+                        <div class="risk-score risk-{{.RiskLevel}}">{{.RiskScore}}</div>
+                        <div>
+                            <strong>Risk Score</strong><br/>
+                            <span style="color: #6c757d;">Based on {{.TotalFindings}} findings</span>
+                        </div>
+                    </div>
+
+                    <div class="stats-grid">
+                        <div class="stat-card">
+                            <span class="stat-value">{{.Stats.DNSAnomalies}}</span>
+                            <span class="stat-label">DNS Anomalies</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-value">{{.Stats.TCPRetransmissions}}</span>
+                            <span class="stat-label">TCP Retransmissions</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-value">{{.Stats.ARPConflicts}}</span>
+                            <span class="stat-label">ARP Conflicts</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-value">{{.Stats.SuspiciousTraffic}}</span>
+                            <span class="stat-label">Suspicious Traffic</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-value">{{.Stats.TLSCerts}}</span>
+                            <span class="stat-label">TLS Certificates</span>
+                        </div>
+                        <div class="stat-card">
+                            <span class="stat-value">{{.Stats.TotalTraffic}}</span>
+                            <span class="stat-label">Total Traffic</span>
+                        </div>
+                    </div>
+
+                    {{if .NextSteps}}
+                    <div class="next-steps">
+                        <h3><i class="fas fa-tasks"></i> Recommended Next Steps</h3>
+                        <ol>
+                            {{range .NextSteps}}
+                            <li>{{.}}</li>
+                            {{end}}
+                        </ol>
+                    </div>
+                    {{end}}
+                </div>
+            </div>
+
+            <!-- Tabbed Sections -->
+            <div class="card">
+                <div class="tabs">
+                    <button class="tab active" data-tab="tab-security"><i class="fas fa-shield-alt"></i> Security</button>
+                    <button class="tab" data-tab="tab-performance"><i class="fas fa-tachometer-alt"></i> Performance</button>
+                    <button class="tab" data-tab="tab-traffic"><i class="fas fa-exchange-alt"></i> Traffic</button>
+                    <button class="tab" data-tab="tab-visualizations"><i class="fas fa-project-diagram"></i> Visualizations</button>
+                </div>
+
+                <!-- Security Tab -->
+                <div id="tab-security" class="tab-content active">
+                    {{if .DNSAnomalies}}
+                    <details open>
+                        <summary><i class="fas fa-dns"></i> DNS Anomalies ({{len .DNSAnomalies}})</summary>
+                        <div>
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th data-sort>Query</th>
+                                        <th data-sort>Answer IP</th>
+                                        <th data-sort>Server</th>
+                                        <th>Reason</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {{range .DNSAnomalies}}
+                                    <tr>
+                                        <td><code>{{.Query}}</code></td>
+                                        <td><code>{{.AnswerIP}}</code></td>
+                                        <td><code>{{.ServerIP}}</code></td>
+                                        <td class="severity-high">{{.Reason}}</td>
+                                        <td><button class="btn btn-sm btn-secondary" onclick="toggleAction(this)">Show Action</button></td>
+                                    </tr>
+                                    <tr class="action-row">
+                                        <td colspan="5">
+                                            <div class="action-content">
+                                                <h4><i class="fas fa-wrench"></i> Recommended Action</h4>
+                                                <ul>
+                                                    <li>Verify DNS server configuration at <strong>{{.ServerIP}}</strong></li>
+                                                    <li>Check for DNS hijacking or poisoning attempts</li>
+                                                    <li>Review firewall rules for DNS traffic</li>
+                                                    <li>Consider using DNS-over-HTTPS (DoH) or DNS-over-TLS (DoT)</li>
+                                                </ul>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {{end}}
+                                </tbody>
+                            </table>
+                        </div>
+                    </details>
+                    {{else}}
+                    <div class="alert alert-success"><i class="fas fa-check"></i> No DNS anomalies detected</div>
+                    {{end}}
+
+                    {{if .ARPConflicts}}
+                    <details>
+                        <summary><i class="fas fa-network-wired"></i> ARP Conflicts ({{len .ARPConflicts}})</summary>
+                        <div>
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th data-sort>IP Address</th>
+                                        <th data-sort>MAC 1</th>
+                                        <th data-sort>MAC 2</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {{range .ARPConflicts}}
+                                    <tr>
+                                        <td><code>{{.IP}}</code></td>
+                                        <td><code>{{.MAC1}}</code></td>
+                                        <td><code>{{.MAC2}}</code></td>
+                                        <td><button class="btn btn-sm btn-secondary" onclick="toggleAction(this)">Show Action</button></td>
+                                    </tr>
+                                    <tr class="action-row">
+                                        <td colspan="4">
+                                            <div class="action-content">
+                                                <h4><i class="fas fa-wrench"></i> Recommended Action</h4>
+                                                <ul>
+                                                    <li>Investigate potential ARP spoofing attack</li>
+                                                    <li>Check for duplicate IP assignments in DHCP</li>
+                                                    <li>Enable Dynamic ARP Inspection (DAI) on switches</li>
+                                                </ul>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {{end}}
+                                </tbody>
+                            </table>
+                        </div>
+                    </details>
+                    {{else}}
+                    <div class="alert alert-success"><i class="fas fa-check"></i> No ARP conflicts detected</div>
+                    {{end}}
+
+                    {{if .SuspiciousTraffic}}
+                    <details>
+                        <summary><i class="fas fa-exclamation-triangle"></i> Suspicious Traffic ({{len .SuspiciousTraffic}})</summary>
+                        <div>
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th data-sort>Source</th>
+                                        <th data-sort>Destination</th>
+                                        <th data-sort>Port</th>
+                                        <th>Reason</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {{range .SuspiciousTraffic}}
+                                    <tr>
+                                        <td><code>{{.SrcIP}}</code></td>
+                                        <td><code>{{.DstIP}}</code></td>
+                                        <td>{{.DstPort}}</td>
+                                        <td class="severity-high">{{.Reason}}</td>
+                                        <td><button class="btn btn-sm btn-secondary" onclick="toggleAction(this)">Show Action</button></td>
+                                    </tr>
+                                    <tr class="action-row">
+                                        <td colspan="5">
+                                            <div class="action-content">
+                                                <h4><i class="fas fa-wrench"></i> Recommended Action</h4>
+                                                <ul>
+                                                    <li>Block traffic to/from suspicious endpoints</li>
+                                                    <li>Investigate source device for malware</li>
+                                                    <li>Review firewall and IDS/IPS logs</li>
+                                                </ul>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {{end}}
+                                </tbody>
+                            </table>
+                        </div>
+                    </details>
+                    {{else}}
+                    <div class="alert alert-success"><i class="fas fa-check"></i> No suspicious traffic detected</div>
+                    {{end}}
+                </div>
+
+                <!-- Performance Tab -->
+                <div id="tab-performance" class="tab-content">
+                    {{if .TCPRetransmissions}}
+                    <details open>
+                        <summary><i class="fas fa-redo"></i> TCP Retransmissions ({{len .TCPRetransmissions}})</summary>
+                        <div>
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th data-sort>Source</th>
+                                        <th data-sort>Destination</th>
+                                        <th data-sort>Port</th>
+                                        <th>Action</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {{range .TCPRetransmissions}}
+                                    <tr>
+                                        <td><code>{{.SrcIP}}:{{.SrcPort}}</code></td>
+                                        <td><code>{{.DstIP}}:{{.DstPort}}</code></td>
+                                        <td>{{.DstPort}}</td>
+                                        <td><button class="btn btn-sm btn-secondary" onclick="toggleAction(this)">Show Action</button></td>
+                                    </tr>
+                                    <tr class="action-row">
+                                        <td colspan="4">
+                                            <div class="action-content">
+                                                <h4><i class="fas fa-wrench"></i> Recommended Action</h4>
+                                                <ul>
+                                                    <li>Check network path between <strong>{{.SrcIP}}</strong> and <strong>{{.DstIP}}</strong></li>
+                                                    <li>Review QoS settings on intermediate devices</li>
+                                                    <li>Check for interface errors or congestion</li>
+                                                    <li>Verify MTU settings along the path</li>
+                                                </ul>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    {{end}}
+                                </tbody>
+                            </table>
+                        </div>
+                    </details>
+                    {{else}}
+                    <div class="alert alert-success"><i class="fas fa-check"></i> No TCP retransmissions detected</div>
+                    {{end}}
+
+                    {{if .HighRTTFlows}}
+                    <details>
+                        <summary><i class="fas fa-clock"></i> High RTT Flows ({{len .HighRTTFlows}})</summary>
+                        <div>
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th data-sort>Source</th>
+                                        <th data-sort>Destination</th>
+                                        <th data-sort>Avg RTT (ms)</th>
+                                        <th data-sort>Max RTT (ms)</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {{range .HighRTTFlows}}
+                                    <tr>
+                                        <td><code>{{.SrcIP}}:{{.SrcPort}}</code></td>
+                                        <td><code>{{.DstIP}}:{{.DstPort}}</code></td>
+                                        <td class="severity-medium">{{printf "%.1f" .AvgRTT}}</td>
+                                        <td>{{printf "%.1f" .MaxRTT}}</td>
+                                    </tr>
+                                    {{end}}
+                                </tbody>
+                            </table>
+                        </div>
+                    </details>
+                    {{end}}
+
+                    {{if .TCPHandshakeFlows}}
+                    <details open>
+                        <summary><i class="fas fa-handshake"></i> TCP Handshake Visualization ({{len .TCPHandshakeFlows}} flows)</summary>
+                        <div>
+                            <!-- Handshake State Legend -->
+                            <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; border-left: 4px solid #007bff;">
+                                <h4 style="margin-top: 0; color: #495057;"><i class="fas fa-info-circle"></i> Handshake State Legend</h4>
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; margin-top: 10px;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span style="color: #007bff; font-size: 18px; font-weight: bold;">→</span>
+                                        <span style="color: #6c757d;">[SYN] - Client initiated connection</span>
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span style="color: #fd7e14; font-size: 18px; font-weight: bold;">←</span>
+                                        <span style="color: #6c757d;">[SYN-ACK] - Server responded</span>
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span style="color: #28a745; font-size: 18px; font-weight: bold;">✓</span>
+                                        <span style="color: #6c757d;">[Complete] - Handshake successful</span>
+                                    </div>
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span style="color: #dc3545; font-size: 18px; font-weight: bold;">✗</span>
+                                        <span style="color: #6c757d;">[Failed] - Handshake failed</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Summary Statistics -->
+                            {{if .TCPHandshakeStats}}
+                            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 20px; border-radius: 8px; margin-bottom: 20px; color: white;">
+                                <h4 style="margin-top: 0; color: white;"><i class="fas fa-chart-bar"></i> Summary Statistics</h4>
+                                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; margin-top: 15px;">
+                                    <div>
+                                        <div style="font-size: 24px; font-weight: bold;">{{.TCPHandshakeStats.TotalFlows}}</div>
+                                        <div style="opacity: 0.9;">Total Flows</div>
+                                    </div>
+                                    <div>
+                                        <div style="font-size: 24px; font-weight: bold; color: #90EE90;">{{.TCPHandshakeStats.SuccessfulCount}}</div>
+                                        <div style="opacity: 0.9;">Successful</div>
+                                    </div>
+                                    <div>
+                                        <div style="font-size: 24px; font-weight: bold; color: #FFB6C1;">{{.TCPHandshakeStats.FailedCount}}</div>
+                                        <div style="opacity: 0.9;">Failed</div>
+                                    </div>
+                                    <div>
+                                        <div style="font-size: 24px; font-weight: bold;">{{printf "%.1f" .TCPHandshakeStats.SuccessRate}}%</div>
+                                        <div style="opacity: 0.9;">Success Rate</div>
+                                    </div>
+                                </div>
+                            </div>
+                            {{end}}
+
+                            <!-- Handshake Flows Table -->
+                            <div style="overflow-x: auto;">
+                                <table style="width: 100%; border-collapse: collapse; margin-top: 15px;">
+                                    <thead>
+                                        <tr style="background: #f8f9fa; border-bottom: 2px solid #dee2e6;">
+                                            <th style="padding: 12px; text-align: left; font-weight: 600;">Flow</th>
+                                            <th style="padding: 12px; text-align: center; font-weight: 600;">State</th>
+                                            <th style="padding: 12px; text-align: right; font-weight: 600;">Time (ms)</th>
+                                            <th style="padding: 12px; text-align: left; font-weight: 600;">Details</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        {{range .TCPHandshakeFlows}}
+                                        <tr style="border-bottom: 1px solid #e9ecef;">
+                                            <td style="padding: 12px; font-family: monospace; font-size: 13px;">
+                                                <div>{{.SrcIP}}:{{.SrcPort}} → {{.DstIP}}:{{.DstPort}}</div>
+                                                {{if .IsIPv6}}<span style="background: #e7f3ff; color: #0066cc; padding: 2px 6px; border-radius: 3px; font-size: 11px; margin-top: 4px; display: inline-block;">IPv6</span>{{end}}
+                                                <details style="margin-top: 8px;">
+                                                    <summary style="cursor: pointer; color: #007bff; font-size: 12px; user-select: none;">
+                                                        <i class="fas fa-filter"></i> Wireshark Filters
+                                                    </summary>
+                                                    <div style="margin-top: 8px; padding: 8px; background: #f8f9fa; border-radius: 4px; font-size: 11px;">
+                                                        <div style="margin-bottom: 6px;">
+                                                            <strong style="color: #495057;">Directional:</strong>
+                                                            <code style="display: block; margin-top: 4px; padding: 4px 8px; background: white; border: 1px solid #dee2e6; border-radius: 3px; word-break: break-all;">{{.WiresharkFilter}}</code>
+                                                        </div>
+                                                        <div>
+                                                            <strong style="color: #495057;">Bidirectional:</strong>
+                                                            <code style="display: block; margin-top: 4px; padding: 4px 8px; background: white; border: 1px solid #dee2e6; border-radius: 3px; word-break: break-all;">{{.WiresharkFilterBidi}}</code>
+                                                        </div>
+                                                    </div>
+                                                </details>
+                                            </td>
+                                            <td style="padding: 12px; text-align: center;">
+                                                {{if eq .StateColor "success"}}
+                                                <span style="background: #d4edda; color: #155724; padding: 6px 12px; border-radius: 20px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px;">
+                                                    <span style="font-size: 16px;">{{.StateIcon}}</span> Complete
+                                                </span>
+                                                {{else if eq .StateColor "danger"}}
+                                                <span style="background: #f8d7da; color: #721c24; padding: 6px 12px; border-radius: 20px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px;">
+                                                    <span style="font-size: 16px;">{{.StateIcon}}</span> Failed
+                                                </span>
+                                                {{else if eq .StateColor "info"}}
+                                                <span style="background: #d1ecf1; color: #0c5460; padding: 6px 12px; border-radius: 20px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px;">
+                                                    <span style="font-size: 16px;">{{.StateIcon}}</span> SYN
+                                                </span>
+                                                {{else if eq .StateColor "warning"}}
+                                                <span style="background: #fff3cd; color: #856404; padding: 6px 12px; border-radius: 20px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px;">
+                                                    <span style="font-size: 16px;">{{.StateIcon}}</span> SYN-ACK
+                                                </span>
+                                                {{else}}
+                                                <span style="background: #e2e3e5; color: #383d41; padding: 6px 12px; border-radius: 20px; font-weight: 600;">
+                                                    {{.State}}
+                                                </span>
+                                                {{end}}
+                                            </td>
+                                            <td style="padding: 12px; text-align: right; font-family: monospace;">
+                                                {{if gt .TotalHandshakeMs 0}}
+                                                    {{printf "%.2f" .TotalHandshakeMs}}
+                                                {{else}}
+                                                    -
+                                                {{end}}
+                                            </td>
+                                            <td style="padding: 12px; color: #6c757d; font-size: 13px;">
+                                                {{if .FailureReason}}
+                                                <span style="color: #dc3545;">{{.FailureReason}}</span>
+                                                {{else}}
+                                                    -
+                                                {{end}}
+                                            </td>
+                                        </tr>
+                                        {{end}}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </details>
+                    {{end}}
+
+                    {{if .TCPHandshakeCorrelatedFlows}}
+                    <details>
+                        <summary><i class="fas fa-exchange-alt"></i> TCP Handshake Analysis ({{len .TCPHandshakeCorrelatedFlows}} flows)</summary>
+                        <div>
+                            <p style="color: #6c757d; margin-bottom: 15px;">TCP handshake events grouped by flow for correlation analysis.</p>
+                            {{range .TCPHandshakeCorrelatedFlows}}
+                            <div class="handshake-flow">
+                                <div class="handshake-flow-header">
+                                    <span class="flow-id"><i class="fas fa-stream"></i> {{.SrcIP}}:{{.SrcPort}} &rarr; {{.DstIP}}:{{.DstPort}}</span>
+                                    {{if eq .Status "Complete"}}
+                                    <span class="flow-status status-complete"><i class="fas fa-check-circle"></i> Complete</span>
+                                    {{else if eq .Status "Failed"}}
+                                    <span class="flow-status status-failed"><i class="fas fa-times-circle"></i> Failed</span>
+                                    {{else}}
+                                    <span class="flow-status status-pending"><i class="fas fa-hourglass-half"></i> Pending</span>
+                                    {{end}}
+                                </div>
+                                <div class="handshake-events">
+                                {{range .Events}}
+                                    {{if eq .Type "SYN"}}
+                                    <div class="event event-syn">
+                                        <span class="event-type">SYN</span>
+                                        <span class="event-time">{{.TimestampFmt}}</span>
+                                    </div>
+                                    {{else if eq .Type "SYN-ACK"}}
+                                    <div class="event event-synack">
+                                        <span class="event-type">SYN-ACK</span>
+                                        <span class="event-time">{{.TimestampFmt}}</span>
+                                    </div>
+                                    {{else if eq .Type "Handshake Complete"}}
+                                    <div class="event event-complete">
+                                        <span class="event-type">HANDSHAKE COMPLETE</span>
+                                        <span class="event-time">{{.TimestampFmt}}</span>
+                                    </div>
+                                    {{end}}
+                                {{end}}
+                                </div>
+                            </div>
+                            {{end}}
+                        </div>
+                    </details>
+                    {{end}}
+                </div>
+
+                <!-- Traffic Tab -->
+                <div id="tab-traffic" class="tab-content">
+                    {{if .TopFlows}}
+                    <details open>
+                        <summary><i class="fas fa-sort-amount-down"></i> Top Traffic Flows ({{len .TopFlows}})</summary>
+                        <div>
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th data-sort>Source</th>
+                                        <th data-sort>Destination</th>
+                                        <th data-sort>Protocol</th>
+                                        <th data-sort>Bytes</th>
+                                        <th data-sort>Percentage</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {{range .TopFlows}}
+                                    <tr>
+                                        <td><code>{{.SrcIP}}:{{.SrcPort}}</code></td>
+                                        <td><code>{{.DstIP}}:{{.DstPort}}</code></td>
+                                        <td>{{.Protocol}}</td>
+                                        <td>{{.BytesFormatted}}</td>
+                                        <td>{{printf "%.1f" .Percentage}}%</td>
+                                    </tr>
+                                    {{end}}
+                                </tbody>
+                            </table>
+                        </div>
+                    </details>
+                    {{end}}
+
+                    {{if .DeviceFingerprints}}
+                    <details>
+                        <summary><i class="fas fa-fingerprint"></i> Device Fingerprints ({{len .DeviceFingerprints}})</summary>
+                        <div>
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th data-sort>IP Address</th>
+                                        <th data-sort>OS Type</th>
+                                        <th data-sort>OS Name</th>
+                                        <th data-sort>Confidence</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {{range .DeviceFingerprints}}
+                                    <tr>
+                                        <td><code>{{.IP}}</code></td>
+                                        <td>{{.OSType}}</td>
+                                        <td>{{.OSName}}</td>
+                                        <td>{{.Confidence}}</td>
+                                    </tr>
+                                    {{end}}
+                                </tbody>
+                            </table>
+                        </div>
+                    </details>
+                    {{end}}
+
+                    {{if .BandwidthReport}}
+                    <details>
+                        <summary><i class="fas fa-tachometer-alt"></i> Bandwidth Report</summary>
+                        <div>
+                            <p style="color: #6c757d; margin-bottom: 15px;">Top bandwidth-consuming flows identified in the capture.</p>
+
+                            {{if .BandwidthReport.TopByBytes}}
+                            <h4 style="margin: 15px 0 10px 0;"><i class="fas fa-database"></i> Top Flows by Bytes</h4>
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th data-sort>Source</th>
+                                        <th data-sort>Destination</th>
+                                        <th data-sort>Protocol</th>
+                                        <th data-sort>Total Bytes</th>
+                                        <th data-sort>Packets</th>
+                                        <th data-sort>Duration</th>
+                                        <th data-sort>Avg Bitrate</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {{range .BandwidthReport.TopByBytes}}
+                                    <tr>
+                                        <td><code>{{.SrcIP}}:{{.SrcPort}}</code></td>
+                                        <td><code>{{.DstIP}}:{{.DstPort}}</code></td>
+                                        <td>{{.Protocol}}</td>
+                                        <td>{{.TotalBytes}}</td>
+                                        <td>{{.TotalPackets}}</td>
+                                        <td>{{.Duration}}</td>
+                                        <td>{{.AvgBitrate}}</td>
+                                    </tr>
+                                    {{end}}
+                                </tbody>
+                            </table>
+                            {{end}}
+
+                            {{if .BandwidthReport.TopByPackets}}
+                            <h4 style="margin: 25px 0 10px 0;"><i class="fas fa-cubes"></i> Top Flows by Packets</h4>
+                            <table class="data-table">
+                                <thead>
+                                    <tr>
+                                        <th data-sort>Source</th>
+                                        <th data-sort>Destination</th>
+                                        <th data-sort>Protocol</th>
+                                        <th data-sort>Total Packets</th>
+                                        <th data-sort>Total Bytes</th>
+                                        <th data-sort>Duration</th>
+                                        <th data-sort>Avg Bitrate</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {{range .BandwidthReport.TopByPackets}}
+                                    <tr>
+                                        <td><code>{{.SrcIP}}:{{.SrcPort}}</code></td>
+                                        <td><code>{{.DstIP}}:{{.DstPort}}</code></td>
+                                        <td>{{.Protocol}}</td>
+                                        <td>{{.TotalPackets}}</td>
+                                        <td>{{.TotalBytes}}</td>
+                                        <td>{{.Duration}}</td>
+                                        <td>{{.AvgBitrate}}</td>
+                                    </tr>
+                                    {{end}}
+                                </tbody>
+                            </table>
+                            {{end}}
+                        </div>
+                    </details>
+                    {{else}}
+                    <div class="alert alert-success"><i class="fas fa-check"></i> No significant bandwidth usage identified</div>
+                    {{end}}
+                </div>
+
+                <!-- Visualizations Tab -->
+                <div id="tab-visualizations" class="tab-content">
+                    <details open>
+                        <summary><i class="fas fa-project-diagram"></i> Network Topology</summary>
+                        <div>
+                            <div id="network-diagram" class="viz-container" style="height: 500px;"></div>
+                        </div>
+                    </details>
+
+                    <details>
+                        <summary><i class="fas fa-clock"></i> Event Timeline</summary>
+                        <div>
+                            <div id="timeline-diagram" class="viz-container" style="height: 300px;"></div>
+                        </div>
+                    </details>
+
+                    <details>
+                        <summary><i class="fas fa-stream"></i> Traffic Flow (Sankey)</summary>
+                        <div>
+                            <div id="sankey-diagram" class="viz-container" style="height: 400px;"></div>
+                        </div>
+                    </details>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>Generated by SD-WAN Triage Tool v{{.Version}} | &copy; {{.Year}} | <a href="https://github.com/gocisse/sdwan-triage">GitHub</a></p>
+        </div>
+    </div>
+
+    <!-- Visualization Data -->
+    <script>
+        var networkData = {{.NetworkDataJSON}};
+        var timelineData = {{.TimelineDataJSON}};
+        var sankeyData = {{.SankeyDataJSON}};
+    </script>
+
+    <!-- Visualization Scripts -->
+    <script>{{.JS}}</script>
+</body>
+</html>

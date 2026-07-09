@@ -1,0 +1,69 @@
+name: Detector false negative
+description: Report a known network condition that TraceSleuth failed to identify.
+title: "detector false negative: "
+labels:
+  - detector-false-negative
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A false-negative report should explain how the condition was independently proven. Do not attach private customer or production captures publicly.
+
+  - type: input
+    id: version
+    attributes:
+      label: TraceSleuth version or commit
+    validations:
+      required: true
+
+  - type: input
+    id: detector
+    attributes:
+      label: Expected detector or finding ID
+      description: Use the stable detector ID when available; otherwise name the expected detection domain.
+    validations:
+      required: true
+
+  - type: textarea
+    id: condition
+    attributes:
+      label: Known fault or condition
+      description: Describe exactly what existed in the network.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proof
+    attributes:
+      label: Independent proof
+      description: Explain how the condition was verified independently of TraceSleuth.
+    validations:
+      required: true
+
+  - type: textarea
+    id: packet-evidence
+    attributes:
+      label: Packet evidence
+      description: Provide packet numbers, protocol fields, timestamps, or Wireshark display filters that demonstrate the condition.
+
+  - type: textarea
+    id: capture-context
+    attributes:
+      label: Capture context and limitations
+      description: PCAP/PCAPNG, link type, snap length, capture point, direction, interface metadata, truncation, capture loss, encryption, or missing control plane.
+    validations:
+      required: true
+
+  - type: textarea
+    id: fixture
+    attributes:
+      label: Synthetic or redistributable fixture
+      description: Describe or link a legally redistributable fixture when available, including expected findings.
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Data handling
+      options:
+        - label: I have not published private customer/production captures, credentials, or sensitive payloads.
+          required: true

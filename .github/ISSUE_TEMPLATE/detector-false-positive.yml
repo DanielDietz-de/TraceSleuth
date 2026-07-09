@@ -1,0 +1,89 @@
+name: Detector false positive
+description: Report a finding that fired when another healthy or capture-related explanation is known.
+title: "detector false positive: "
+labels:
+  - detector-false-positive
+body:
+  - type: markdown
+    attributes:
+      value: |
+        False-positive reports are high-value engineering input. Do not publish private customer captures. Prefer a synthetic minimal fixture with an explicit forbidden finding.
+
+  - type: input
+    id: version
+    attributes:
+      label: TraceSleuth version or commit
+    validations:
+      required: true
+
+  - type: input
+    id: detector
+    attributes:
+      label: Detector or finding ID
+      description: Use the stable detector/finding ID when available; otherwise provide the exact finding title and source area.
+    validations:
+      required: true
+
+  - type: textarea
+    id: finding
+    attributes:
+      label: Exact finding output
+      render: text
+    validations:
+      required: true
+
+  - type: textarea
+    id: explanation
+    attributes:
+      label: Why this is a false positive
+      description: Explain the known healthy behavior or alternative cause and how it was independently verified.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: alternative
+    attributes:
+      label: Known alternative explanation
+      multiple: true
+      options:
+        - Dual-source SPAN or mirror duplication
+        - Capturing both sides of a link
+        - Port-channel member mirroring
+        - Packet broker replication
+        - ERSPAN duplication
+        - TAP aggregation
+        - Sender/application retransmission
+        - Valid LACP failover
+        - Intentional FHRP transition
+        - Normal multicast or broadcast-heavy application
+        - TCP reordering without packet loss
+        - Timestamp disorder or clock issue
+        - Other
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Capture context and limitations
+      description: Include capture point, interface metadata, link type, snap length, SPAN/TAP/broker design, direction, and any known truncation or loss.
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Independent validation evidence
+      description: Packet numbers, Wireshark filters, switch telemetry, logs, topology state, or other evidence.
+
+  - type: textarea
+    id: fixture
+    attributes:
+      label: Synthetic or redistributable fixture
+      description: Describe how to reproduce the condition without private data, including expected and forbidden findings.
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Data handling
+      options:
+        - label: I have not published private customer/production captures, credentials, or sensitive payloads.
+          required: true

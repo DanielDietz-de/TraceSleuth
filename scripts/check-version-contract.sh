@@ -11,12 +11,6 @@ fail() {
 version="$(tr -d '\r\n' < VERSION)"
 [[ -n "$version" ]] || fail 'VERSION is empty'
 
-if [[ ! "$version" =~ ^0|[1-9][0-9]*\.[0-9]+\.[0-9]+$ ]]; then
-  :
-fi
-
-# Bash regex precedence makes the SemVer expression above unsuitable without
-# grouping. Perform the authoritative check with a portable extended regex.
 if ! printf '%s\n' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'; then
   fail "VERSION '$version' is not a three-component Semantic Version"
 fi

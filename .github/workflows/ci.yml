@@ -25,10 +25,20 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Validate version contract
         run: bash scripts/check-version-contract.sh
+
+      - name: Validate changed-file hygiene
+        shell: bash
+        run: |
+          if [[ -n "${GITHUB_BASE_REF:-}" ]]; then
+            bash scripts/check-repository-hygiene.sh "origin/${GITHUB_BASE_REF}"
+          else
+            bash scripts/check-repository-hygiene.sh
+          fi
 
   go-quality:
     name: Go format, vet, and tests

@@ -153,10 +153,11 @@ jobs:
           mkdir -p cmd/sdwan-triage/dist
           cp -R web/frontend/dist/. cmd/sdwan-triage/dist/
 
-      - name: Build inherited runtime entry point
+      - name: Build TraceSleuth binary
         run: |
+          version="$(tr -d '\r\n' < VERSION)"
           mkdir -p build/ci
-          go build -trimpath -o build/ci/sdwan-triage ./cmd/sdwan-triage
+          go build -trimpath -ldflags "-s -w -X main.version=${version} -X main.buildCommit=${GITHUB_SHA}" -o build/ci/tracesleuth ./cmd/sdwan-triage
 
       - name: Verify build artifact
-        run: test -s build/ci/sdwan-triage
+        run: test -s build/ci/tracesleuth

@@ -44,12 +44,14 @@ type AuthConfig struct {
 	DB     *database.DB
 }
 
-// NewAuthConfig creates a new auth config with a cryptographically random secret.
+// NewAuthConfig creates a new authentication configuration with a
+// cryptographically random per-process signing secret. TraceSleuth fails closed
+// if the operating-system CSPRNG cannot provide a signing key; it never falls
+// back to a public or hard-coded secret.
 func NewAuthConfig(db *database.DB) *AuthConfig {
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
-		// Fallback — should never happen
-		secret = []byte("sdwan-triage-fallback-secret-change-me")
+		panic(fmt.Sprintf("cannot initialize JWT signing secret from operating-system CSPRNG: %v", err))
 	}
 	return &AuthConfig{
 		Secret: secret,
@@ -69,7 +71,7 @@ func (ac *AuthConfig) GenerateToken(user *database.User) (string, time.Time, err
 			Subject:   user.Username,
 			IssuedAt:  jwt.NewNumericDate(time.Now()),
 			ExpiresAt: jwt.NewNumericDate(expiresAt),
-			Issuer:    "sdwan-triage",
+			Issuer:    "tracesleuth",
 		},
 	}
 
@@ -106,7 +108,7 @@ func (ac *AuthConfig) RequireAuth() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var tokenStr string
 
-		// 1. Try Authorization header first
+		// Try the Authorization header first.
 		authHeader := c.GetHeader("Authorization")
 		if authHeader != "" {
 			parts := strings.SplitN(authHeader, " ", 2)
@@ -115,8 +117,9 @@ func (ac *AuthConfig) RequireAuth() gin.HandlerFunc {
 			}
 		}
 
-		// 2. Fall back to ?token= query param (required for WebSocket — browsers
-		//    cannot send custom headers on the WS upgrade request)
+		// Fall back to a query parameter for the inherited browser WebSocket
+		// implementation. This remains a documented hardening item because query
+		// parameters can be exposed through access logs and intermediary systems.
 		if tokenStr == "" {
 			tokenStr = c.Query("token")
 		}
@@ -136,7 +139,7 @@ func (ac *AuthConfig) RequireAuth() gin.HandlerFunc {
 			return
 		}
 
-		// Verify user still exists and is active
+		// Verify the user still exists and is active.
 		user, err := ac.DB.GetUserByID(claims.UserID)
 		if err != nil || !user.IsActive {
 			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
@@ -145,7 +148,7 @@ func (ac *AuthConfig) RequireAuth() gin.HandlerFunc {
 			return
 		}
 
-		// Store user info in context for downstream handlers
+		// Store user information in the request context for downstream handlers.
 		c.Set(ContextKeyUser, user.Username)
 		c.Set(ContextKeyUserID, user.ID)
 		c.Set(ContextKeyRole, string(user.Role))
@@ -166,9 +169,16 @@ func RequireRole(allowed ...database.UserRole) gin.HandlerFunc {
 			return
 		}
 
-		role := database.UserRole(roleStr.(string))
-		for _, a := range allowed {
-			if role == a {
+		role, ok := roleStr.(string)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"error": "Invalid authentication context",
+			})
+			return
+		}
+
+		for _, allowedRole := range allowed {
+			if database.UserRole(role) == allowedRole {
 				c.Next()
 				return
 			}
@@ -180,9 +190,13 @@ func RequireRole(allowed ...database.UserRole) gin.HandlerFunc {
 	}
 }
 
-// GenerateSecretHex returns a hex-encoded random secret (utility for config files).
+// GenerateSecretHex returns a hex-encoded random secret. It fails closed if the
+// operating-system CSPRNG is unavailable rather than returning predictable key
+// material.
 func GenerateSecretHex() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("cannot generate cryptographic secret from operating-system CSPRNG: %v", err))
+	}
 	return hex.EncodeToString(b)
 }

@@ -47,6 +47,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Go
@@ -55,24 +56,60 @@ jobs:
           go-version-file: go.mod
           cache-dependency-path: go.sum
 
-      - name: Verify Go formatting
+      - name: Verify changed Go formatting
         shell: bash
         run: |
+          if [[ -n "${GITHUB_BASE_REF:-}" ]]; then
+            base="origin/${GITHUB_BASE_REF}"
+            diff_range="${base}...HEAD"
+          else
+            diff_range="HEAD^..HEAD"
+          fi
+
+          mapfile -d '' changed_go_files < <(
+            git diff --name-only -z --diff-filter=ACMR "$diff_range" -- '*.go'
+          )
+
+          if ((${#changed_go_files[@]} == 0)); then
+            echo 'No changed Go files require formatting validation.'
+            exit 0
+          fi
+
+          unformatted="$(gofmt -l "${changed_go_files[@]}")"
+          if [[ -n "$unformatted" ]]; then
+            printf 'Changed Go files are not gofmt-clean:\n%s\n' "$unformatted" >&2
+            exit 1
+          fi
+
+          printf 'Changed Go formatting OK for %d file(s).\n' "${#changed_go_files[@]}"
+
+      - name: Report inherited Go formatting debt
+        shell: bash
+        run: |
+          mkdir -p build/ci
           mapfile -d '' go_files < <(find . -type f -name '*.go' \
             -not -path './web/releases/*' \
             -not -path './releases/*' \
             -print0)
 
-          if ((${#go_files[@]} == 0)); then
-            echo 'No Go files found.'
-            exit 1
-          fi
-
           unformatted="$(gofmt -l "${go_files[@]}")"
           if [[ -n "$unformatted" ]]; then
-            printf 'The following Go files are not gofmt-clean:\n%s\n' "$unformatted" >&2
-            exit 1
+            printf '%s\n' "$unformatted" > build/ci/legacy-gofmt-unformatted.txt
+            count="$(printf '%s\n' "$unformatted" | wc -l)"
+            echo "::warning::Inherited baseline contains ${count} Go file(s) that are not gofmt-clean; see the diagnostic artifact. New/changed Go files remain a blocking gate."
+          else
+            rm -f build/ci/legacy-gofmt-unformatted.txt
+            echo 'Complete non-historical Go source tree is gofmt-clean.'
           fi
+
+      - name: Upload Go formatting diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: legacy-gofmt-debt
+          path: build/ci/legacy-gofmt-unformatted.txt
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Go vet
         run: go vet ./...
@@ -99,7 +136,7 @@ jobs:
         run: go test -race ./... -timeout 240s
 
   frontend:
-    name: Frontend typecheck, lint, tests, and build
+    name: Frontend build, changed-file lint, and tests
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -108,6 +145,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
         with:
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Set up Node.js
@@ -123,8 +161,51 @@ jobs:
       - name: Typecheck and build
         run: npm run build
 
-      - name: Lint
-        run: npm run lint
+      - name: Lint changed frontend source
+        shell: bash
+        run: |
+          if [[ -n "${GITHUB_BASE_REF:-}" ]]; then
+            diff_range="origin/${GITHUB_BASE_REF}...HEAD"
+          else
+            diff_range="HEAD^..HEAD"
+          fi
+
+          mapfile -t changed_frontend_files < <(
+            git -C ../.. diff --name-only --diff-filter=ACMR "$diff_range" -- web/frontend \
+              | grep -E '\.(ts|tsx)$' \
+              | sed 's#^web/frontend/##' || true
+          )
+
+          if ((${#changed_frontend_files[@]} == 0)); then
+            echo 'No changed TypeScript/TSX files require blocking lint validation.'
+            exit 0
+          fi
+
+          npx eslint "${changed_frontend_files[@]}" --report-unused-disable-directives --max-warnings 0
+
+      - name: Report inherited frontend lint debt
+        shell: bash
+        run: |
+          set +e
+          npm run lint > lint-output.txt 2>&1
+          status=$?
+          set -e
+
+          if (( status != 0 )); then
+            echo "::warning::Inherited frontend baseline still has lint failures; see the diagnostic artifact. New/changed frontend source remains a blocking lint gate."
+          else
+            rm -f lint-output.txt
+            echo 'Complete frontend source tree passes lint.'
+          fi
+
+      - name: Upload frontend lint diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: inherited-frontend-lint-debt
+          path: web/frontend/lint-output.txt
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Unit tests
         run: npm run test

@@ -52,6 +52,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITLEAKS_CONFIG: gitleaks.toml
           GITLEAKS_ENABLE_COMMENTS: 'false'
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
+          GITLEAKS_REPORT_FORMAT: sarif
+          GITLEAKS_REPORT_PATH: results.sarif
+
+      - name: Upload Gitleaks diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gitleaks-sarif
+          path: results.sarif
+          if-no-files-found: ignore
+          retention-days: 14
 
   codeql:
     name: CodeQL (${{ matrix.language }})

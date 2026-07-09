@@ -18,8 +18,14 @@ fi
 grep -Fq "## [$version]" CHANGELOG.md || fail "CHANGELOG.md has no [$version] release section"
 grep -Fq "**Current version line:** \`$version\` bootstrap" ROADMAP.md || fail "ROADMAP.md does not declare $version as the current bootstrap line"
 grep -Fq 'The repository-root `VERSION` file is the authoritative source' docs/project/VERSIONING.md || fail 'VERSIONING.md does not declare VERSION authoritative'
+grep -Fq 'BINARY_NAME  := tracesleuth' Makefile || fail 'Makefile does not build the tracesleuth product artifact'
+grep -Fq 'VERSION      := $(shell tr -d' Makefile || fail 'Makefile does not derive VERSION from the root VERSION file'
+grep -Fq 'BINARY_NAME: tracesleuth' .github/workflows/release.yml || fail 'release workflow artifact identity is not tracesleuth'
+grep -Fq "version-${version}-blue" README.md || fail "README version badge is not aligned with VERSION=$version"
 
-# During the bootstrap phase legacy runtime surfaces intentionally still carry
-# inherited SD-WAN Triage versions. They are inventoried in the baseline audit
-# and will be added to this exact-alignment gate as each surface is migrated.
+# During the bootstrap phase a few legacy runtime surfaces intentionally remain,
+# including the Go module path, command source directory, frontend package name,
+# API metadata, and some configuration/storage paths. The baseline audit and
+# roadmap track those migration gaps explicitly; they are not treated as aligned
+# until the corresponding implementation work is complete and CI is extended.
 printf 'TraceSleuth bootstrap version contract OK: %s\n' "$version"

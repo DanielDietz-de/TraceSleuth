@@ -3,85 +3,104 @@ name: Release
 on:
   push:
     tags:
-      - 'v*'
+      - 'v*.*.*'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 env:
-  GO_VERSION: '1.24'
-  NODE_VERSION: '20'
-  BINARY_NAME: sdwan-triage
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  NODE_VERSION: '24'
+  BINARY_NAME: tracesleuth
 
 jobs:
   release:
-    name: Build & Release
+    name: Build and release TraceSleuth
     runs-on: ubuntu-latest
     steps:
-      # ─── CHECKOUT ──────────────────────────────────────────
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          persist-credentials: false
 
-      # ─── EXTRACT VERSION ───────────────────────────────────
-      - name: Extract version from tag
+      - name: Read and validate version
         id: version
+        shell: bash
         run: |
-          TAG="${GITHUB_REF#refs/tags/}"
-          VERSION="${TAG#v}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          version="$(tr -d '\r\n' < VERSION)"
+          tag="${GITHUB_REF#refs/tags/}"
+
+          if [[ "$tag" == "$GITHUB_REF" ]]; then
+            echo 'Release workflow must run from a tag.' >&2
+            exit 1
+          fi
+
+          if [[ "$tag" != "v${version}" ]]; then
+            printf 'Tag/version mismatch: tag=%s VERSION=%s\n' "$tag" "$version" >&2
+            exit 1
+          fi
+
+          bash scripts/check-version-contract.sh
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
 
-      # ─── NODE / FRONTEND ───────────────────────────────────
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: npm
           cache-dependency-path: web/frontend/package-lock.json
 
-      - name: Build React frontend
+      - name: Build and test frontend
         working-directory: web/frontend
         run: |
           npm ci
           npm run build
+          npm run lint
+          npm run test
 
-      - name: Copy frontend dist to embed directory
+      - name: Stage embedded frontend
         run: |
           rm -rf cmd/sdwan-triage/dist
           mkdir -p cmd/sdwan-triage/dist
-          cp -r web/frontend/dist/* cmd/sdwan-triage/dist/
+          cp -R web/frontend/dist/. cmd/sdwan-triage/dist/
 
-      # ─── GO / BACKEND ─────────────────────────────────────
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
-          go-version: ${{ env.GO_VERSION }}
-          cache: true
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
 
-      - name: Run tests
-        run: go test ./... -timeout 60s
-
-      - name: Define ldflags
-        id: ldflags
+      - name: Verify Go quality
         run: |
-          LDFLAGS="-s -w"
-          LDFLAGS="$LDFLAGS -X main.version=${{ steps.version.outputs.version }}"
-          LDFLAGS="$LDFLAGS -X main.buildCommit=${{ steps.version.outputs.commit }}"
-          LDFLAGS="$LDFLAGS -X main.buildDate=${{ steps.version.outputs.date }}"
-          echo "flags=$LDFLAGS" >> "$GITHUB_OUTPUT"
+          go vet ./...
+          go test ./... -timeout 120s
+          go test -race ./... -timeout 240s
 
-      # ─── CROSS-COMPILE ────────────────────────────────────
+      - name: Define build metadata
+        id: ldflags
+        shell: bash
+        run: |
+          flags="-s -w"
+          flags="$flags -X main.version=${{ steps.version.outputs.version }}"
+          flags="$flags -X main.buildCommit=${{ steps.version.outputs.commit }}"
+          flags="$flags -X main.buildDate=${{ steps.version.outputs.date }}"
+          echo "flags=$flags" >> "$GITHUB_OUTPUT"
+
       - name: Build Linux amd64
         env:
           CGO_ENABLED: 0
           GOOS: linux
           GOARCH: amd64
         run: |
-          go build -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-linux-amd64 ./cmd/sdwan-triage
+          mkdir -p build
+          go build -trimpath -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-linux-amd64 ./cmd/sdwan-triage
           tar -czf build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-linux-amd64.tar.gz -C build ${{ env.BINARY_NAME }}-linux-amd64
 
       - name: Build macOS amd64
@@ -90,7 +109,7 @@ jobs:
           GOOS: darwin
           GOARCH: amd64
         run: |
-          go build -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-darwin-amd64 ./cmd/sdwan-triage
+          go build -trimpath -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-darwin-amd64 ./cmd/sdwan-triage
           tar -czf build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-darwin-amd64.tar.gz -C build ${{ env.BINARY_NAME }}-darwin-amd64
 
       - name: Build macOS arm64
@@ -99,7 +118,7 @@ jobs:
           GOOS: darwin
           GOARCH: arm64
         run: |
-          go build -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-darwin-arm64 ./cmd/sdwan-triage
+          go build -trimpath -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-darwin-arm64 ./cmd/sdwan-triage
           tar -czf build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-darwin-arm64.tar.gz -C build ${{ env.BINARY_NAME }}-darwin-arm64
 
       - name: Build Windows amd64
@@ -108,28 +127,32 @@ jobs:
           GOOS: windows
           GOARCH: amd64
         run: |
-          go build -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-windows-amd64.exe ./cmd/sdwan-triage
-          cd build && zip ${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-windows-amd64.zip ${{ env.BINARY_NAME }}-windows-amd64.exe
+          go build -trimpath -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-windows-amd64.exe ./cmd/sdwan-triage
+          cd build
+          zip ${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-windows-amd64.zip ${{ env.BINARY_NAME }}-windows-amd64.exe
 
-      # ─── CHECKSUMS ────────────────────────────────────────
-      - name: Generate checksums
+      - name: Generate SHA-256 checksums
         working-directory: build
         run: |
           sha256sum *.tar.gz *.zip > checksums-${{ steps.version.outputs.tag }}.txt
           cat checksums-${{ steps.version.outputs.tag }}.txt
 
-      # ─── GITHUB RELEASE ───────────────────────────────────
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: SD-WAN Triage ${{ steps.version.outputs.tag }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          files: |
-            build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-linux-amd64.tar.gz
-            build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-darwin-amd64.tar.gz
-            build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-darwin-arm64.tar.gz
-            build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-windows-amd64.zip
-            build/checksums-${{ steps.version.outputs.tag }}.txt
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          prerelease_args=()
+          if [[ '${{ steps.version.outputs.version }}' == 0.* ]]; then
+            prerelease_args+=(--prerelease)
+          fi
+
+          gh release create '${{ steps.version.outputs.tag }}' \
+            build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-linux-amd64.tar.gz \
+            build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-darwin-amd64.tar.gz \
+            build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-darwin-arm64.tar.gz \
+            build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-windows-amd64.zip \
+            build/checksums-${{ steps.version.outputs.tag }}.txt \
+            --title 'TraceSleuth ${{ steps.version.outputs.tag }}' \
+            --generate-notes \
+            "${prerelease_args[@]}"

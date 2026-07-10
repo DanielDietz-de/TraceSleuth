@@ -81,6 +81,8 @@ jobs:
             ci-go-vet.txt
             ci-go-test.txt
             ci-go-build.txt
+            go.mod
+            go.sum
           if-no-files-found: ignore
           retention-days: 7
 

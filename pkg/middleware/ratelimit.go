@@ -16,8 +16,8 @@ type RateLimitConfig struct {
 }
 
 type visitor struct {
-	tokens    float64
-	lastSeen  time.Time
+	tokens   float64
+	lastSeen time.Time
 }
 
 type rateLimiter struct {

@@ -37,14 +37,14 @@ type PortScanThresholds struct {
 
 // PerformanceThresholds holds performance-related thresholds
 type PerformanceThresholds struct {
-	HighRTTMs      float64 `yaml:"high_rtt_ms"`       // RTT threshold for warning (default: 100ms)
-	CriticalRTTMs  float64 `yaml:"critical_rtt_ms"`   // RTT threshold for critical (default: 200ms)
-	PacketLossWarn float64 `yaml:"packet_loss_warn"`  // Packet loss % for warning (default: 1%)
-	PacketLossCrit float64 `yaml:"packet_loss_crit"`  // Packet loss % for critical (default: 5%)
-	RetransmitWarn int     `yaml:"retransmit_warn"`   // Retransmissions for warning (default: 10)
+	HighRTTMs      float64 `yaml:"high_rtt_ms"`      // RTT threshold for warning (default: 100ms)
+	CriticalRTTMs  float64 `yaml:"critical_rtt_ms"`  // RTT threshold for critical (default: 200ms)
+	PacketLossWarn float64 `yaml:"packet_loss_warn"` // Packet loss % for warning (default: 1%)
+	PacketLossCrit float64 `yaml:"packet_loss_crit"` // Packet loss % for critical (default: 5%)
+	RetransmitWarn int     `yaml:"retransmit_warn"`  // Retransmissions for warning (default: 10)
 	RetransmitCrit int     `yaml:"retransmit_crit"`  // Retransmissions for critical (default: 50)
-	JitterWarnMs   float64 `yaml:"jitter_warn_ms"`    // Jitter threshold for warning (default: 30ms)
-	JitterCritMs   float64 `yaml:"jitter_crit_ms"`    // Jitter threshold for critical (default: 50ms)
+	JitterWarnMs   float64 `yaml:"jitter_warn_ms"`   // Jitter threshold for warning (default: 30ms)
+	JitterCritMs   float64 `yaml:"jitter_crit_ms"`   // Jitter threshold for critical (default: 50ms)
 }
 
 // AnalysisThresholds holds analysis behavior options

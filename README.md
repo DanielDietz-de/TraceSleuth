@@ -1,222 +1,425 @@
-<p align="center">
-  <img src="Pharaoh.svg.png" alt="SD-WAN Triage Tool" width="180" />
-</p>
+# TraceSleuth
 
-<h1 align="center">SD-WAN Triage Tool</h1>
+**Packets tell the story. TraceSleuth finds the problem.**
 
-<p align="center">
-  <strong>The Forensic Platform for SD-WAN Troubleshooting & Security Analysis</strong>
-</p>
+TraceSleuth is an open-source PCAP analysis platform that automatically detects network faults, anomalies, protocol issues, loops, redundancy failures, and other network pathologies.
 
-<p align="center">
-  <a href="https://github.com/gocisse/sdwan-triage/releases/tag/v6.2.0.0"><img src="https://img.shields.io/badge/Release-v6.2.0-blue?style=for-the-badge" alt="Release v6.2.0" /></a>
-  <a href="https://go.dev/"><img src="https://img.shields.io/badge/Go-1.25-00ADD8?style=for-the-badge&logo=go&logoColor=white" alt="Go Version" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-green?style=for-the-badge" alt="License: MIT" /></a>
-  <a href="#platform-support"><img src="https://img.shields.io/badge/Platform-Mac%20%7C%20Linux%20%7C%20Win-orange?style=for-the-badge" alt="Platform: Mac/Linux/Win" /></a>
-</p>
+> **Primary product promise:** Upload or analyze a packet capture and receive evidence-backed findings showing what appears wrong, why TraceSleuth reached that conclusion, which packets support it, how confident the diagnosis is, what alternative explanations exist, and how to validate the result independently.
 
----
+## Project status
 
-## Executive Summary
+**Current maturity: early pre-1.0 transformation (`0.1.0` bootstrap).**
 
-**SD-WAN Triage** is a single-binary forensic platform for offline PCAP analysis. Upload a packet capture, and within seconds receive a comprehensive network health assessment — spanning security threats, performance bottlenecks, protocol anomalies, and device fingerprinting — all in an interactive web dashboard or detailed CLI report.
+TraceSleuth originated from the MIT-licensed SD-WAN Triage project and is being transformed into an independent, deterministic-first network fault-analysis platform. The imported application already provides substantial PCAP analysis, protocol parsing, CLI, web UI, reporting, packet inspection, and two-capture comparison capabilities. The defining TraceSleuth architecture—capture trust, normalized observations, structured evidence, stable detector contracts, advanced L2 analysis, LACP, MLAG symptom inference, and generalized multi-capture correlation—is being implemented incrementally.
 
-What sets it apart is **LAN vs WAN Path Integrity Verification**: capture traffic on both sides of the SD-WAN edge, and the tool will automatically correlate packets, detect what was dropped, modified, or NAT'd in transit, and compute a **Path Integrity Score** that quantifies how faithfully the SD-WAN overlay is delivering your traffic.
+Do not interpret the current repository as a stable 1.0 product. In particular:
 
-**Zero dependencies. No agents. No cloud. Just one binary and your PCAP.**
+- no production-stable TraceSleuth loop detector is claimed yet;
+- no full LACP state-machine detector is claimed yet;
+- no universal MLAG parser is claimed or planned;
+- MLAG-related conclusions will be symptom inference with explicit evidence and limitations;
+- current inherited findings do not yet all use the target normalized evidence model;
+- inherited authentication and upload-security issues identified in the baseline audit require remediation before production server exposure.
+
+See [`docs/audits/INITIAL_BASELINE_AUDIT.md`](docs/audits/INITIAL_BASELINE_AUDIT.md) for the exact starting state.
 
 ---
 
-## Key Features
+## What TraceSleuth is becoming
 
-### 🛡️ Threat Intelligence Integration
-Cross-reference every packet against **STIX 2.1** threat feeds. Load directories of IOC bundles and instantly flag C2 servers, malware domains, botnet nodes, phishing infrastructure, and ransomware indicators — all with O(1) map lookups for zero performance penalty.
+TraceSleuth is designed for deterministic, evidence-backed diagnosis across:
 
-### 🔍 LAN vs WAN Comparison
-Automated **streaming packet correlation** across two capture files. Identifies dropped packets, TTL/DSCP modifications, NAT translations, failed handshakes, retransmission storms, and latency spikes. Produces a **Forensic Comparison Summary** with one-way latency percentiles and flow-level drop analysis.
+- campus and enterprise LANs;
+- data-center networks;
+- WAN and SD-WAN environments;
+- traditional routed networks;
+- Internet-edge environments;
+- server networks;
+- highly redundant LACP/MLAG architectures;
+- voice networks;
+- multi-vendor environments.
 
-### 🗺️ GeoIP Visualization
-Every external IP is geolocated using an **embedded MaxMind GeoLite2 database** (compiled into the binary). The web dashboard renders an interactive world map of traffic flows with country, city, and coordinate data.
+The target diagnostic scope includes:
 
-### 🔐 JA3/JA3S Fingerprinting
-Extracts TLS client (JA3) and server (JA3S) fingerprints from handshakes. Matches against known malware, bot, and application fingerprint databases. Displays hashes with one-click copy and direct links to abuse.ch lookup.
+### Capture trust
 
-### 📊 Interactive Timeline
-Click and drag across the packet-rate histogram to **time-filter all panels** simultaneously — findings, conversations, protocol stats, and the flow table all respond to the selected time window. Press Escape to reset.
+- PCAP/PCAPNG integrity;
+- link-layer visibility;
+- truncation;
+- timestamp quality;
+- parser failures;
+- capture loss where metadata exposes it;
+- duplicate capture / probable SPAN duplication;
+- visibility limitations that reduce confidence in other findings.
 
-### 🎓 Wireshark Academy
-Every finding card is a **3-step guided troubleshooting workflow** (Verify → Diagnose → Resolve) with persistent checklists, risk warnings, vendor-specific CLI commands, and an educational Wireshark comparison modal featuring interactive TCP header SVG diagrams.
+### Layer 2
 
-### 🌐 Global Filtering
-Real-time filtering by Source IP, Destination IP, Port/Service, and Protocol directly in the Web UI. Partial matching (e.g., `10.0` matches all IPs in that subnet), service name resolution (e.g., `https` → port 443), and composable stacking with the timeline scrubber.
+- exact and near-duplicate frame storms;
+- broadcast and multicast storms;
+- probable Layer-2 loops;
+- unknown-unicast flooding symptoms where observable;
+- ARP and IPv6 Neighbor Discovery anomalies;
+- STP/RSTP/MSTP/PVST-related instability where observable.
 
-### 📡 35+ Protocol Analyzers
-DDoS detection, port scanning, DNS tunneling, C2 beaconing, TCP anomalies (retransmissions, zero window, out-of-order), DHCP rogue servers, NTP amplification, ARP spoofing, VRRP/HSRP/STP, ICMP anomalies, SIP/RTP voice quality, and more.
+### Link aggregation and redundancy
+
+- LACP actor/partner state;
+- key and identity inconsistency;
+- synchronization, collecting, and distributing loss;
+- partner churn and timeout mismatch;
+- VRRP and HSRP instability;
+- probable duplicate forwarding;
+- multi-chassis forwarding inconsistency;
+- MLAG split-brain-compatible symptoms without pretending that MLAG is one standardized wire protocol.
+
+### Layer 3, transport, and services
+
+- routing-loop symptoms;
+- TTL/hop-limit anomalies;
+- ICMP errors;
+- fragmentation and MTU/PMTUD symptoms;
+- TCP handshake failures, retransmissions, duplicate ACKs, reordering, zero windows, RTT and resets;
+- DNS failures and latency;
+- DHCP allocation failures and competing-server behavior;
+- NTP anomalies;
+- SIP/RTP quality issues;
+- tunnel and encapsulation anomalies.
+
+### Multi-capture correlation
+
+The target model supports arbitrary named capture points rather than assuming only “LAN” and “WAN”:
+
+```text
+Capture A — client access
+Capture B — server access
+Capture C — firewall ingress
+Capture D — firewall egress
+Capture E — WAN edge
+```
+
+TraceSleuth will correlate disappearance, duplication, modification, NAT, TTL/DSCP changes, encapsulation, ordering, asymmetry, duplicate forwarding, and latency while making timing uncertainty explicit.
 
 ---
 
-## Installation
+## Engineering principles
 
-### Quick Start (Binaries)
+### Deterministic analysis first
 
-Download the latest release for your platform from [GitHub Releases](https://github.com/gocisse/sdwan-triage/releases/latest):
+An LLM or other generative AI system must never be the primary authority deciding whether a loop, LACP fault, STP problem, retransmission anomaly, MLAG inconsistency, or other network pathology exists.
 
-**macOS (Apple Silicon)**
-```bash
-curl -LO https://github.com/gocisse/sdwan-triage/releases/download/v6.2.0.0/sdwan-triage-v6.2.0.0-darwin-arm64.tar.gz
-tar xzf sdwan-triage-v6.2.0.0-darwin-arm64.tar.gz
-chmod +x sdwan-triage-darwin-arm64
-./sdwan-triage-darwin-arm64 -web
+Primary findings come from protocol parsing, state machines, time-series analysis, packet correlation, frame fingerprinting, statistical analysis, standards-based validation, deterministic rules, and documented heuristics.
+
+Optional AI functionality may later explain deterministic findings or summarize them. Core analysis works without cloud services, AI models, external APIs, or Internet access.
+
+### Evidence before conclusion
+
+A significant TraceSleuth finding is expected to answer:
+
+1. What was observed?
+2. Which packets support the observation?
+3. During what time range did it occur?
+4. Which entities were involved?
+5. Why does the evidence indicate a problem?
+6. How confident is TraceSleuth?
+7. Is the condition observed or inferred?
+8. Which alternative explanations exist?
+9. Which capture limitations may invalidate the conclusion?
+10. How can an engineer validate the result independently in Wireshark?
+11. What should be investigated next?
+
+### Fact, inference, and hypothesis are different
+
+Target certainty values are:
+
+```text
+observed
+strongly_inferred
+probable
+possible
+informational
 ```
 
-**macOS (Intel)**
-```bash
-curl -LO https://github.com/gocisse/sdwan-triage/releases/download/v6.2.0.0/sdwan-triage-v6.2.0.0-darwin-amd64.tar.gz
-tar xzf sdwan-triage-v6.2.0.0-darwin-amd64.tar.gz
-chmod +x sdwan-triage-darwin-amd64
-./sdwan-triage-darwin-amd64 -web
-```
+For example, if a capture shows duplicate forwarding, LACP identity changes, and correlated path anomalies, TraceSleuth may report that the evidence is consistent with a multi-chassis forwarding inconsistency. It must not assert that a specific MLAG peer link is down unless that state is directly observable.
 
-**Linux (amd64)**
-```bash
-curl -LO https://github.com/gocisse/sdwan-triage/releases/download/v6.2.0.0/sdwan-triage-v6.2.0.0-linux-amd64.tar.gz
-tar xzf sdwan-triage-v6.2.0.0-linux-amd64.tar.gz
-chmod +x sdwan-triage-linux-amd64
-./sdwan-triage-linux-amd64 -web
-```
+### False-positive resistance over dramatic claims
 
-**Windows (amd64)**
-```powershell
-# Download and extract sdwan-triage-v6.2.0.0-windows-amd64.zip from GitHub Releases
-.\sdwan-triage-windows-amd64.exe -web
-```
+Duplicate frames can be caused by loops, but also by SPAN configuration, packet brokers, TAP aggregation, capturing both sides of a link, port-channel member mirroring, ERSPAN, legitimate retransmission, intentional replication, or capture artifacts.
 
-### From Source
-
-```bash
-git clone https://github.com/gocisse/sdwan-triage.git
-cd sdwan-triage
-make build           # Build for current platform
-make release         # Cross-compile for all platforms
-```
-
-> Requires Go 1.25+ and Node.js 18+ (for frontend build).
+High-severity conclusions should normally require multiple independent signals unless one protocol violation is itself definitive.
 
 ---
 
-## Usage
+## Current inherited capabilities
 
-### Web Mode
+The imported baseline already contains useful functionality that will be preserved where correct:
 
-```bash
-# Start web server (opens browser automatically on port 8080)
-./sdwan-triage -web
+- offline PCAP and PCAPNG processing;
+- Go-based backend;
+- CLI analysis;
+- embedded React web interface;
+- JSON output;
+- HTML/CSV/PDF-oriented report paths;
+- packet inspection and packet export;
+- timeline data;
+- two-capture LAN/WAN comparison;
+- packet modification/NAT/TTL/DSCP comparison concepts;
+- TCP handshake and RTT analysis;
+- DNS, ARP, ICMP, DHCP, NTP, SIP/RTP, tunnel, BGP, VRRP, HSRP, CDP, LLDP, and basic STP-related analysis;
+- selected security-oriented analyzers;
+- local storage and embedded authentication;
+- single-binary distribution intent.
 
-# Custom port, no auto-open browser
-./sdwan-triage -web -port 9090 -no-browser
-
-# Web mode with threat intelligence feeds
-./sdwan-triage -web --threat-intel ./feeds/
-```
-
-**Default credentials:** `admin` / `admin` (change after first login).
-
-### CLI Mode
-
-```bash
-# Single PCAP analysis
-./sdwan-triage capture.pcap
-
-# LAN vs WAN comparison
-./sdwan-triage -compare -lan capture-lan.pcap -wan capture-wan.pcap
-
-# Analysis with threat intelligence
-./sdwan-triage --threat-intel ./feeds/ capture.pcap
-
-# Filter by IP and protocol
-./sdwan-triage -src-ip 10.0.0.1 -protocol tcp capture.pcap
-
-# JSON output
-./sdwan-triage -json capture.pcap > report.json
-```
-
-### Threat Intel Feeds (STIX 2.1)
-
-Place STIX 2.1 JSON bundle files in a directory:
-
-```bash
-./sdwan-triage --threat-intel ./feeds/ capture.pcap
-```
-
-A sample feed is included at `feeds/example-threat-feed.json`. Supported indicator types: `ipv4-addr`, `ipv6-addr`, `domain-name`, `file:hashes`, `url:value`.
+These capabilities are not automatically considered TraceSleuth-stable. Each detector must meet the project acceptance criteria before it is advertised as stable.
 
 ---
 
-## Screenshots
+## Architecture direction
 
-| Dashboard | Findings |
-|-----------|----------|
-| ![Dashboard](docs/dashboard.png) | ![Findings](docs/findings.png) |
+```mermaid
+flowchart TD
+    A[Untrusted PCAP / PCAPNG] --> B[Capture trust preflight]
+    B --> C[Streaming packet decode]
+    C --> D[Normalized observations]
+    D --> E[Detectors and protocol state machines]
+    E --> F[Structured evidence and packet references]
+    F --> G[Explainable correlation]
+    G --> H[Findings: severity + confidence + certainty + alternatives + limitations]
+    H --> I[CLI / JSON / API / Web UI / Reports]
+```
 
-| Threat Intel | Comparison |
-|-------------|------------|
-| ![Threat Intel](docs/threat-intel.png) | ![Comparison](docs/comparison.png) |
+The existing application will evolve incrementally toward a cleaner package model covering capture ingestion, capture quality, normalized protocol observations, detectors, evidence, findings, correlation, topology, reporting, API, authentication, storage, and configuration.
+
+Massive uncontrolled rewrites are explicitly avoided.
 
 ---
 
-## Platform Support
+## Example target finding
 
-| Platform | Architecture | Binary |
-|----------|-------------|--------|
-| Linux | amd64 | `sdwan-triage-linux-amd64` |
-| macOS | Intel (amd64) | `sdwan-triage-darwin-amd64` |
-| macOS | Apple Silicon (arm64) | `sdwan-triage-darwin-arm64` |
-| Windows | amd64 | `sdwan-triage-windows-amd64.exe` |
+The following illustrates the intended output style. It is a product-format example, not a claim that the current `0.1.0` code already implements this detector.
 
-All binaries are statically linked (`CGO_ENABLED=0`) and include the embedded React frontend + GeoIP database (~97MB).
+```text
+CRITICAL — Probable Layer-2 forwarding loop
+
+Confidence: 96/100
+Certainty: strongly_inferred
+
+Observed:
+- 287,431 repeated Ethernet frames in 8.3 seconds.
+- Broadcast rate increased from 42 pps to 31,872 pps.
+- One ARP request fingerprint was observed 4,721 times.
+- Median recurrence interval was 630 microseconds.
+- An STP topology-change event occurred 112 ms before amplification began.
+
+Alternative explanations considered:
+- Multiple-source SPAN duplication
+- Packet broker replication
+- Port-channel member mirroring
+
+Why they are less likely:
+- Frame multiplicity increased over time instead of remaining at a fixed factor.
+- Multiple independent broadcast fingerprints amplified together.
+- STP instability preceded amplification.
+
+Recommended validation:
+- Review the referenced packet range.
+- Apply the provided Wireshark display filters.
+- Inspect root-bridge and blocked-port changes on affected switches.
+```
+
+Real findings must reference actual packets and must not fabricate evidence.
 
 ---
 
-## Architecture
+## Quick start during the 0.1.0 bootstrap
 
+The imported executable path has not yet been renamed in code. Until the build-safe executable/module migration lands, use the legacy entry point explicitly:
+
+```bash
+git clone https://github.com/DanielDietz-de/TraceSleuth.git
+cd TraceSleuth
+
+go run ./cmd/sdwan-triage -help
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Single Binary                        │
-│  ┌──────────────────┐  ┌─────────────────────────────┐  │
-│  │   Go Backend     │  │   Embedded React Frontend   │  │
-│  │                  │  │                             │  │
-│  │  35+ Analyzers   │  │  Dashboard + Visualizations │  │
-│  │  STIX Parser     │  │  D3.js Maps + Timeline      │  │
-│  │  Streaming       │  │  Wireshark Academy          │  │
-│  │  Comparator      │  │  Global Filtering           │  │
-│  │  GeoIP (embed)   │  │  Forensic Workflows         │  │
-│  └──────────────────┘  └─────────────────────────────┘  │
-│  ┌──────────────────────────────────────────────────────┤
-│  │  Gin HTTP Server  │  SQLite Auth  │  Redis Storage  │
-│  └──────────────────────────────────────────────────────┤
-└─────────────────────────────────────────────────────────┘
+
+Analyze one capture:
+
+```bash
+go run ./cmd/sdwan-triage capture.pcap
 ```
+
+Start the current loopback-only web UI:
+
+```bash
+go run ./cmd/sdwan-triage -web
+```
+
+The intended TraceSleuth CLI evolves toward:
+
+```text
+tracesleuth analyze capture.pcap
+tracesleuth compare capture-a.pcap capture-b.pcap
+tracesleuth serve
+tracesleuth detectors list
+tracesleuth version
+```
+
+Those commands must not be treated as implemented until the corresponding code and tests exist.
+
+---
+
+## Supported capture formats
+
+The imported capture reader currently recognizes:
+
+- classic PCAP;
+- classic PCAP nanosecond variants;
+- PCAPNG section-header format.
+
+PCAPNG mixed-link-type reading is enabled. A full capture-quality preflight, interface metadata model, truncation analysis, timestamp-quality analysis, and duplicate-capture detector are planned before advanced fault inference is trusted.
+
+---
+
+## Supported platforms
+
+The imported release workflow currently builds for:
+
+| Platform | Architecture |
+|---|---|
+| Linux | amd64 |
+| macOS | amd64 |
+| macOS | arm64 |
+| Windows | amd64 |
+
+Platform support will be revalidated under the TraceSleuth release process. A build target is not automatically a guarantee of production support.
+
+---
+
+## Detector maturity
+
+TraceSleuth uses the following intended detector status vocabulary:
+
+- `experimental`
+- `beta`
+- `stable`
+
+No detector should be called stable until it has a stable ID, documented algorithm, positive fixture, negative fixture, false-positive fixture where relevant, unit and boundary tests, confidence and limitation documentation, Wireshark validation guidance, JSON/UI presentation, packet evidence references, and changelog coverage.
+
+High-risk heuristic detectors such as probable loops and MLAG symptoms require multiple adversarial false-positive fixtures.
+
+---
+
+## Security and privacy
+
+Packet captures are highly sensitive. They may contain credentials, tokens, cookies, personal data, internal addresses, DNS names, file contents, and application payloads.
+
+TraceSleuth is intended to remain local-first:
+
+- no mandatory cloud dependency;
+- no mandatory AI service;
+- no automatic PCAP upload to external services;
+- no default telemetry.
+
+The imported baseline currently contains security issues that are explicitly documented in the baseline audit, including universal default administrator credentials and upload-handling weaknesses. Do not expose the current pre-stable web application on untrusted networks until those issues are resolved and the deployment path is documented as hardened.
+
+---
+
+## Versioning
+
+TraceSleuth starts a new semantic-version lineage:
+
+```text
+0.1.0
+```
+
+It does not continue the SD-WAN Triage 6.x sequence.
+
+The repository-root [`VERSION`](VERSION) file is the authoritative product version source. See [`docs/project/VERSIONING.md`](docs/project/VERSIONING.md).
+
+---
+
+## Roadmap
+
+The high-level progression is:
+
+```text
+0.1.0  Product bootstrap, provenance, identity, repository hardening
+0.2.0  Capture integrity and normalized evidence foundation
+0.3.0  Detector framework and correlation engine
+0.4.0  Layer-2 pathology engine
+0.5.0  STP, LACP, redundancy and MLAG symptom analysis
+0.6.0  Multi-capture correlation and topology reasoning
+0.7.0  Diagnostic UI and evidence workflows
+0.8.0  Production hardening, security and deployment
+0.9.0  Release candidate and detector validation
+1.0.0  First stable public TraceSleuth release
+```
+
+See [`ROADMAP.md`](ROADMAP.md) for phased acceptance criteria.
+
+---
+
+## Documentation
+
+Current bootstrap documentation:
+
+- [`docs/audits/INITIAL_BASELINE_AUDIT.md`](docs/audits/INITIAL_BASELINE_AUDIT.md) — actual imported architecture, detectors, security, tests, CI, storage, and debt.
+- [`UPSTREAM.md`](UPSTREAM.md) — exact upstream baseline and relationship.
+- [`docs/history/ORIGIN.md`](docs/history/ORIGIN.md) — architectural and functional evolution.
+- [`docs/development/UPSTREAM_WORKFLOW.md`](docs/development/UPSTREAM_WORKFLOW.md) — deliberate upstream-review process.
+- [`docs/project/VERSIONING.md`](docs/project/VERSIONING.md) — independent version policy.
+- [`docs/project/RELEASE_PROCESS.md`](docs/project/RELEASE_PROCESS.md) — release gates and artifacts.
+- [`ROADMAP.md`](ROADMAP.md) — implementation phases and acceptance criteria.
+
+Additional architecture, detector, testing, security, operations, usage, and deployment documentation will be added with the implementation that makes it true.
 
 ---
 
 ## Contributing
 
-Contributions are welcome! Please open an issue or submit a pull request.
+Contributions are welcome, especially in:
 
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+- capture-quality analysis;
+- packet evidence and PCAP fixture generation;
+- deterministic protocol parsing;
+- false-positive test cases;
+- STP/LACP/ARP/ND/FHRP diagnostics;
+- multi-capture correlation;
+- parser fuzzing;
+- performance benchmarking;
+- secure self-hosting;
+- documentation and Wireshark validation workflows.
+
+Do not submit private customer or production captures to the public repository. Prefer minimal synthetic fixtures and document provenance and redistribution rights for third-party captures.
+
+---
+
+## Upstream attribution
+
+TraceSleuth originated from the MIT-licensed **SD-WAN Triage** project by Gocisse.
+
+TraceSleuth preserves attribution to the original project while pursuing an independent architecture, roadmap, product identity, release lifecycle, and network-diagnostics mission.
+
+TraceSleuth is not represented as an official continuation of SD-WAN Triage, an endorsed build, or a replacement maintained by the original SD-WAN Triage author.
+
+Exact provenance:
+
+```text
+Original project:  SD-WAN Triage
+Original repository: https://github.com/gocisse/sdwan-triage
+Upstream baseline: 43c6cd412860a5219577be6d30feca2db7f57309
+TraceSleuth import: da35429b7284bb6a2bc61f2049209dfff299703c
+```
+
+See [`UPSTREAM.md`](UPSTREAM.md) and [`docs/history/ORIGIN.md`](docs/history/ORIGIN.md).
 
 ---
 
 ## License
 
-This project is licensed under the **MIT License** — see the [LICENSE](LICENSE) file for details.
+TraceSleuth is distributed under the MIT License inherited from the upstream project. The original copyright and permission notice are preserved in [`LICENSE`](LICENSE).
+
+Additional TraceSleuth contributions do not erase upstream rights or provenance.
 
 ---
 
-<p align="center">
-  <sub>Built with ❤️ for network engineers who refuse to fly blind.</sub>
-</p>
+**Packets tell the story. TraceSleuth finds the problem.**

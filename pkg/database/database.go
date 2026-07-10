@@ -12,8 +12,8 @@ import (
 	"sync"
 	"time"
 
-	_ "modernc.org/sqlite"
 	"golang.org/x/crypto/bcrypt"
+	_ "modernc.org/sqlite"
 )
 
 // UserRole defines the role-based access control levels.

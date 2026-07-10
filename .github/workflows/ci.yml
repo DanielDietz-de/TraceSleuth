@@ -17,7 +17,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: '1.25.x'
+  GO_VERSION: '1.25.12'
   NODE_VERSION: '24'
   STATICCHECK_VERSION: 'v0.7.0'
   GOVULNCHECK_VERSION: 'v1.1.4'

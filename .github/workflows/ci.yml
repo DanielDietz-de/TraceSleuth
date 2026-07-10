@@ -43,21 +43,46 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          unformatted="$(gofmt -l .)"
-          if [[ -n "${unformatted}" ]]; then
+          gofmt -l . | tee ci-gofmt.txt
+          if [[ -s ci-gofmt.txt ]]; then
             echo 'The following Go files are not gofmt-clean:' >&2
-            printf '%s\n' "${unformatted}" >&2
+            cat ci-gofmt.txt >&2
             exit 1
           fi
 
       - name: Run go vet
-        run: go vet ./...
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          go vet ./... 2>&1 | tee ci-go-vet.txt
 
       - name: Run Go tests
-        run: go test ./... -timeout 5m
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test ./... -timeout 5m 2>&1 | tee ci-go-test.txt
 
       - name: Build backend
-        run: go build ./cmd/sdwan-triage
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          go build ./cmd/sdwan-triage 2>&1 | tee ci-go-build.txt
+
+      - name: Upload backend diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-diagnostics
+          path: |
+            ci-gofmt.txt
+            ci-go-vet.txt
+            ci-go-test.txt
+            ci-go-build.txt
+          if-no-files-found: ignore
+          retention-days: 7
 
   static-analysis:
     name: Staticcheck
@@ -78,7 +103,19 @@ jobs:
         run: go install honnef.co/go/tools/cmd/staticcheck@${{ env.STATICCHECK_VERSION }}
 
       - name: Run Staticcheck
-        run: staticcheck ./...
+        shell: bash
+        run: |
+          set -euo pipefail
+          staticcheck ./... 2>&1 | tee ci-staticcheck.txt
+
+      - name: Upload Staticcheck diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: staticcheck-diagnostics
+          path: ci-staticcheck.txt
+          if-no-files-found: ignore
+          retention-days: 7
 
   race:
     name: Go race detector
@@ -96,7 +133,19 @@ jobs:
           cache: true
 
       - name: Run race-enabled tests
-        run: go test -race ./... -timeout 10m
+        shell: bash
+        run: |
+          set -euo pipefail
+          go test -race ./... -timeout 10m 2>&1 | tee ci-race.txt
+
+      - name: Upload race diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: race-diagnostics
+          path: ci-race.txt
+          if-no-files-found: ignore
+          retention-days: 7
 
   frontend:
     name: Frontend lint, test and build
@@ -122,13 +171,36 @@ jobs:
         run: npm ci
 
       - name: Run frontend lint
-        run: npm run lint
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run lint 2>&1 | tee ../../ci-frontend-lint.txt
 
       - name: Run frontend tests
-        run: npm test
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm test 2>&1 | tee ../../ci-frontend-test.txt
 
       - name: Build frontend and type-check
-        run: npm run build
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run build 2>&1 | tee ../../ci-frontend-build.txt
+
+      - name: Upload frontend diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-diagnostics
+          path: |
+            ci-frontend-lint.txt
+            ci-frontend-test.txt
+            ci-frontend-build.txt
+          if-no-files-found: ignore
+          retention-days: 7
 
   vulnerability-scan:
     name: Go vulnerability scan
@@ -149,7 +221,19 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
 
       - name: Run govulncheck
-        run: govulncheck ./...
+        shell: bash
+        run: |
+          set -euo pipefail
+          govulncheck ./... 2>&1 | tee ci-govulncheck.txt
+
+      - name: Upload govulncheck diagnostics
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: govulncheck-diagnostics
+          path: ci-govulncheck.txt
+          if-no-files-found: ignore
+          retention-days: 7
 
   secret-scan:
     name: Secret scan

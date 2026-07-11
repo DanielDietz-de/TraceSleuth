@@ -40,28 +40,33 @@ jobs:
     name: Secret scan
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout current tree
+      - name: Checkout full history
         uses: actions/checkout@v7
         with:
-          fetch-depth: 1
+          fetch-depth: 0
           persist-credentials: false
 
-      - name: Scan current repository tree
-        uses: gitleaks/gitleaks-action@v3
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITLEAKS_CONFIG: gitleaks.toml
-          GITLEAKS_ENABLE_COMMENTS: 'false'
-          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: 'false'
-          GITLEAKS_REPORT_FORMAT: sarif
-          GITLEAKS_REPORT_PATH: results.sarif
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: '1.25.12'
+          cache: true
+
+      - name: Install pinned Gitleaks
+        run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
+
+      - name: Scan repository
+        shell: bash
+        run: |
+          set -o pipefail
+          gitleaks detect --source . --redact --no-banner --verbose --config gitleaks.toml 2>&1 | tee gitleaks-diagnostics.txt
 
       - name: Upload Gitleaks diagnostics
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: gitleaks-sarif
-          path: results.sarif
+          name: gitleaks-diagnostics
+          path: gitleaks-diagnostics.txt
           if-no-files-found: ignore
           retention-days: 14
 

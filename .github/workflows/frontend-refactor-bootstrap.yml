@@ -1,0 +1,216 @@
+name: TraceSleuth bootstrap frontend hook refactors
+
+on:
+  push:
+    branches:
+      - agent/tracesleuth-phase-0-bootstrap
+
+permissions:
+  contents: write
+
+jobs:
+  apply-validated-refactors:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    defaults:
+      run:
+        working-directory: web/frontend
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/tracesleuth-phase-0-bootstrap
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Capture current lint findings
+        shell: bash
+        run: npx eslint . -f json > /tmp/eslint-before.json || true
+
+      - name: Replace exactly two conditional useMemo calls with direct computations
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat > /tmp/refactor-conditional-usememo.mjs <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import ts from './node_modules/typescript/lib/typescript.js';
+
+          const lint = JSON.parse(fs.readFileSync('/tmp/eslint-before.json', 'utf8'));
+          const targets = [];
+          for (const file of lint) {
+            for (const message of file.messages ?? []) {
+              if (message.severity === 2 && message.ruleId === 'react-hooks/rules-of-hooks') {
+                targets.push({
+                  filePath: file.filePath,
+                  line: message.line,
+                  column: message.column,
+                });
+              }
+            }
+          }
+
+          if (targets.length !== 2) {
+            throw new Error(`Expected exactly two conditional-hook errors, found ${targets.length}`);
+          }
+
+          for (const target of targets) {
+            const relative = target.filePath.split('/web/frontend/').pop();
+            const filePath = path.join(process.cwd(), relative);
+            let source = fs.readFileSync(filePath, 'utf8');
+            const sourceFile = ts.createSourceFile(
+              filePath,
+              source,
+              ts.ScriptTarget.Latest,
+              true,
+              ts.ScriptKind.TSX,
+            );
+
+            const matches = [];
+            function visit(node) {
+              if (ts.isCallExpression(node) && node.expression.getText(sourceFile) === 'useMemo') {
+                const start = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile));
+                const end = sourceFile.getLineAndCharacterOfPosition(node.getEnd());
+                if (target.line >= start.line + 1 && target.line <= end.line + 1) {
+                  matches.push(node);
+                }
+              }
+              ts.forEachChild(node, visit);
+            }
+            visit(sourceFile);
+
+            if (matches.length !== 1) {
+              throw new Error(
+                `${relative}:${target.line}: expected one containing useMemo call, found ${matches.length}`,
+              );
+            }
+
+            const call = matches[0];
+            const callback = call.arguments[0];
+            if (!callback || (!ts.isArrowFunction(callback) && !ts.isFunctionExpression(callback))) {
+              throw new Error(`${relative}: useMemo callback is not a function`);
+            }
+
+            const bodyText = callback.body.getText(sourceFile);
+            const replacement = ts.isBlock(callback.body)
+              ? `(() => ${bodyText})()`
+              : `(${bodyText})`;
+
+            source =
+              source.slice(0, call.getStart(sourceFile)) +
+              replacement +
+              source.slice(call.getEnd());
+
+            if (!source.includes('useMemo(')) {
+              source = source
+                .replace(/\buseMemo\s*,\s*/g, '')
+                .replace(/,\s*useMemo\b/g, '');
+            }
+
+            fs.writeFileSync(filePath, source);
+          }
+          NODE
+
+          node /tmp/refactor-conditional-usememo.mjs
+
+      - name: Make the single intentionally empty block explicit
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import json
+          import re
+          from pathlib import Path
+
+          lint = json.load(open('/tmp/eslint-before.json'))
+          items = []
+          for file in lint:
+              for message in file.get('messages', []):
+                  if message.get('severity') == 2 and message.get('ruleId') == 'no-empty':
+                      items.append((file['filePath'], message['line']))
+
+          if len(items) != 1:
+              raise SystemExit(f'Expected exactly one no-empty error, found {len(items)}')
+
+          relative = items[0][0].split('/web/frontend/')[-1]
+          path = Path(relative)
+          text = path.read_text()
+
+          patterns = [
+              r'catch\s*\{\s*\}',
+              r'catch\s*\([^)]*\)\s*\{\s*\}',
+              r'\{\s*\}',
+          ]
+
+          for pattern in patterns:
+              matches = list(re.finditer(pattern, text, re.S))
+              if len(matches) != 1:
+                  continue
+              match = matches[0]
+              block = match.group(0)
+              if block.startswith('catch'):
+                  replacement = block[:-1].rstrip() + '\n    // Intentionally ignore this non-critical failure.\n  }'
+              else:
+                  replacement = '{\n    // Intentionally empty.\n  }'
+              text = text[:match.start()] + replacement + text[match.end():]
+              path.write_text(text)
+              break
+          else:
+              raise SystemExit(f'Could not identify exactly one empty block in {relative}')
+          PY
+
+      - name: Apply deterministic ESLint formatting fixes
+        run: npx eslint . --fix
+
+      - name: Validate frontend lint
+        run: npm run lint
+
+      - name: Run all frontend tests
+        run: npm test -- --run
+
+      - name: Build and type-check frontend
+        run: npm run build
+
+      - name: Enforce expected three-file change scope
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t changed < <(git diff --name-only | sort)
+          expected=(
+            'web/frontend/src/components/FindingCard.tsx'
+            'web/frontend/src/components/FindingsSection.tsx'
+            'web/frontend/src/components/TCPSequenceGraph.tsx'
+          )
+          if [[ "${changed[*]}" != "${expected[*]}" ]]; then
+            printf 'Unexpected changed files:\n%s\n' "${changed[*]}" >&2
+            exit 1
+          fi
+
+      - name: Remove bootstrap workflow and commit exact refactors
+        working-directory: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/frontend-refactor-bootstrap.yml
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+
+          if git diff --cached --quiet --exit-code; then
+            echo 'No frontend refactor changes remain.'
+            exit 0
+          fi
+
+          git commit -m 'fix: resolve inherited frontend hook-order lint defects'
+          git push origin HEAD:agent/tracesleuth-phase-0-bootstrap

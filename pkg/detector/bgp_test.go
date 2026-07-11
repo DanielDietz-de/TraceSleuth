@@ -178,7 +178,7 @@ func TestDetectBGPHijack_NormalPath(t *testing.T) {
 func TestBGPAnalyzer_NewBGPAnalyzer(t *testing.T) {
 	analyzer := NewBGPAnalyzer()
 	if analyzer == nil {
-		t.Error("NewBGPAnalyzer returned nil")
+		t.Fatal("NewBGPAnalyzer returned nil")
 	}
 	if analyzer.bgpSessions == nil {
 		t.Error("bgpSessions map not initialized")

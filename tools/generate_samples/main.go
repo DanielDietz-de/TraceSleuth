@@ -12,11 +12,11 @@ import (
 
 // PCAP file format constants
 const (
-	pcapMagic     = 0xa1b2c3d4
+	pcapMagic      = 0xa1b2c3d4
 	pcapVersionMaj = 2
 	pcapVersionMin = 4
-	pcapSnapLen   = 65535
-	pcapLinkType  = 1 // Ethernet
+	pcapSnapLen    = 65535
+	pcapLinkType   = 1 // Ethernet
 )
 
 func main() {
@@ -108,7 +108,7 @@ func buildIPv4(srcIP, dstIP []byte, protocol uint8, payload []byte) []byte {
 	pkt[1] = 0    // DSCP/ECN
 	binary.BigEndian.PutUint16(pkt[2:4], uint16(totalLen))
 	binary.BigEndian.PutUint16(pkt[4:6], 0x1234) // ID
-	pkt[6] = 0x40 // Don't Fragment
+	pkt[6] = 0x40                                // Don't Fragment
 	pkt[7] = 0
 	pkt[8] = 64 // TTL
 	pkt[9] = protocol

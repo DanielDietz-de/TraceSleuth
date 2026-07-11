@@ -268,8 +268,7 @@ func (d *TLSDecryptor) TryDecryptRecord(data []byte, clientRandom [32]byte, from
 	}
 
 	version := uint16(data[1])<<8 | uint16(data[2])
-	recordLen := int(data[3])<<4<<4 | int(data[4])
-	recordLen = int(binary.BigEndian.Uint16(data[3:5]))
+	recordLen := int(binary.BigEndian.Uint16(data[3:5]))
 	if len(data) < 5+recordLen {
 		return nil
 	}

@@ -1,0 +1,136 @@
+name: Security
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  GO_VERSION: '1.25.12'
+  GOVULNCHECK_VERSION: 'v1.1.4'
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  govulncheck:
+    name: Go vulnerability scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Prepare Go embed inputs
+        shell: bash
+        run: |
+          mkdir -p cmd/sdwan-triage/dist cmd/sdwan-triage/data
+          printf '<!doctype html><title>TraceSleuth CI placeholder</title>\n' > cmd/sdwan-triage/dist/index.html
+          cp data/GeoLite2-City.mmdb cmd/sdwan-triage/data/GeoLite2-City.mmdb
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install pinned govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+
+      - name: Run govulncheck
+        shell: bash
+        run: |
+          set -o pipefail
+          govulncheck ./... 2>&1 | tee govulncheck-diagnostics.txt
+
+      - name: Upload govulncheck diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: govulncheck-diagnostics
+          path: govulncheck-diagnostics.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+  secret-scan:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout full history
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install pinned Gitleaks
+        run: go install github.com/zricethezav/gitleaks/v8@v8.30.1
+
+      - name: Scan repository
+        shell: bash
+        run: |
+          set -o pipefail
+          gitleaks detect --source . --redact --no-banner --verbose --config gitleaks.toml 2>&1 | tee gitleaks-diagnostics.txt
+
+      - name: Upload Gitleaks diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: gitleaks-diagnostics
+          path: gitleaks-diagnostics.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+  codeql:
+    name: CodeQL (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - language: go
+            build-mode: autobuild
+          - language: javascript-typescript
+            build-mode: none
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Prepare Go embed inputs
+        if: matrix.language == 'go'
+        shell: bash
+        run: |
+          mkdir -p cmd/sdwan-triage/dist cmd/sdwan-triage/data
+          printf '<!doctype html><title>TraceSleuth CI placeholder</title>\n' > cmd/sdwan-triage/dist/index.html
+          cp data/GeoLite2-City.mmdb cmd/sdwan-triage/data/GeoLite2-City.mmdb
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: '/language:${{ matrix.language }}'

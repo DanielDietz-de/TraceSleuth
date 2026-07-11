@@ -1,0 +1,336 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository-contract:
+    name: Repository contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate version contract
+        run: bash scripts/check-version-contract.sh
+
+      - name: Validate changed-file hygiene
+        shell: bash
+        run: |
+          if [[ -n "${GITHUB_BASE_REF:-}" ]]; then
+            bash scripts/check-repository-hygiene.sh "origin/${GITHUB_BASE_REF}"
+          else
+            bash scripts/check-repository-hygiene.sh
+          fi
+
+  frontend-dist:
+    name: Frontend build artifact
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Install dependencies and build
+        working-directory: web/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload frontend distribution
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist
+          path: web/frontend/dist
+          if-no-files-found: error
+          retention-days: 1
+
+  go-module-metadata:
+    name: Verify Go module metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Verify canonical module metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+
+  go-quality:
+    name: Go format, vet, and tests
+    needs: frontend-dist
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Restore built frontend for Go embed
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: cmd/sdwan-triage/dist
+
+      - name: Prepare GeoIP embed input
+        run: |
+          mkdir -p cmd/sdwan-triage/data
+          cp data/GeoLite2-City.mmdb cmd/sdwan-triage/data/GeoLite2-City.mmdb
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Verify changed Go formatting
+        shell: bash
+        run: |
+          if [[ -n "${GITHUB_BASE_REF:-}" ]]; then
+            base="origin/${GITHUB_BASE_REF}"
+            diff_range="${base}...HEAD"
+          else
+            diff_range="HEAD^..HEAD"
+          fi
+
+          mapfile -d '' changed_go_files < <(
+            git diff --name-only -z --diff-filter=ACMR "$diff_range" -- '*.go'
+          )
+
+          if ((${#changed_go_files[@]} == 0)); then
+            echo 'No changed Go files require formatting validation.'
+            exit 0
+          fi
+
+          unformatted="$(gofmt -l "${changed_go_files[@]}")"
+          if [[ -n "$unformatted" ]]; then
+            printf 'Changed Go files are not gofmt-clean:\n%s\n' "$unformatted" >&2
+            exit 1
+          fi
+
+          printf 'Changed Go formatting OK for %d file(s).\n' "${#changed_go_files[@]}"
+
+      - name: Report inherited Go formatting debt
+        shell: bash
+        run: |
+          mkdir -p build/ci
+          mapfile -d '' go_files < <(find . -type f -name '*.go' \
+            -not -path './web/releases/*' \
+            -not -path './releases/*' \
+            -print0)
+
+          unformatted="$(gofmt -l "${go_files[@]}")"
+          if [[ -n "$unformatted" ]]; then
+            printf '%s\n' "$unformatted" > build/ci/legacy-gofmt-unformatted.txt
+            count="$(printf '%s\n' "$unformatted" | wc -l)"
+            echo "::warning::Inherited baseline contains ${count} Go file(s) that are not gofmt-clean; see the diagnostic artifact. New/changed Go files remain a blocking gate."
+          else
+            rm -f build/ci/legacy-gofmt-unformatted.txt
+            echo 'Complete non-historical Go source tree is gofmt-clean.'
+          fi
+
+      - name: Upload Go formatting diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: legacy-gofmt-debt
+          path: build/ci/legacy-gofmt-unformatted.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Go vet
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build/ci
+          go vet ./... 2>&1 | tee build/ci/go-vet-diagnostics.txt
+
+      - name: Upload Go vet diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: go-vet-diagnostics
+          path: build/ci/go-vet-diagnostics.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Go tests
+        run: go test ./... -timeout 120s
+
+  go-race:
+    name: Go race tests
+    needs: frontend-dist
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Restore built frontend for Go embed
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: cmd/sdwan-triage/dist
+
+      - name: Prepare GeoIP embed input
+        run: |
+          mkdir -p cmd/sdwan-triage/data
+          cp data/GeoLite2-City.mmdb cmd/sdwan-triage/data/GeoLite2-City.mmdb
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Run race detector
+        run: go test -race ./... -timeout 240s
+
+  frontend:
+    name: Frontend build, changed-file lint, and tests
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web/frontend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck and build
+        run: npm run build
+
+      - name: Lint changed frontend source
+        shell: bash
+        run: |
+          if [[ -n "${GITHUB_BASE_REF:-}" ]]; then
+            diff_range="origin/${GITHUB_BASE_REF}...HEAD"
+          else
+            diff_range="HEAD^..HEAD"
+          fi
+
+          mapfile -t changed_frontend_files < <(
+            git -C ../.. diff --name-only --diff-filter=ACMR "$diff_range" -- web/frontend \
+              | grep -E '\.(ts|tsx)$' \
+              | sed 's#^web/frontend/##' || true
+          )
+
+          if ((${#changed_frontend_files[@]} == 0)); then
+            echo 'No changed TypeScript/TSX files require blocking lint validation.'
+            exit 0
+          fi
+
+          npx eslint "${changed_frontend_files[@]}" --report-unused-disable-directives --max-warnings 0
+
+      - name: Report inherited frontend lint debt
+        shell: bash
+        run: |
+          set +e
+          npm run lint > lint-output.txt 2>&1
+          status=$?
+          set -e
+
+          if (( status != 0 )); then
+            echo "::warning::Inherited frontend baseline still has lint failures; see the diagnostic artifact. New/changed frontend source remains a blocking lint gate."
+          else
+            rm -f lint-output.txt
+            echo 'Complete frontend source tree passes lint.'
+          fi
+
+      - name: Upload frontend lint diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: inherited-frontend-lint-debt
+          path: web/frontend/lint-output.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Unit tests
+        run: npm run test
+
+  embedded-build:
+    name: Embedded frontend and backend build
+    needs: frontend-dist
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Restore built frontend for Go embed
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: cmd/sdwan-triage/dist
+
+      - name: Prepare GeoIP embed input
+        run: |
+          mkdir -p cmd/sdwan-triage/data
+          cp data/GeoLite2-City.mmdb cmd/sdwan-triage/data/GeoLite2-City.mmdb
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Build TraceSleuth binary
+        run: |
+          version="$(tr -d '\r\n' < VERSION)"
+          mkdir -p build/ci
+          go build -trimpath -ldflags "-s -w -X main.version=${version} -X main.buildCommit=${GITHUB_SHA}" -o build/ci/tracesleuth ./cmd/sdwan-triage
+
+      - name: Verify build artifact
+        run: test -s build/ci/tracesleuth

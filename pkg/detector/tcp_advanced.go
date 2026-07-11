@@ -10,11 +10,11 @@ import (
 
 // TCP Advanced analysis thresholds
 const (
-	ZeroWindowThreshold    = 3   // Number of zero-window events to report
-	SmallWindowThreshold   = 5   // Number of small-window events to report
-	SmallWindowSize        = 1024 // Window size considered "small"
-	OutOfOrderMinCount     = 10  // Minimum OOO packets to report
-	OutOfOrderMinPercent   = 2.0 // Minimum OOO percentage to report
+	ZeroWindowThreshold  = 3    // Number of zero-window events to report
+	SmallWindowThreshold = 5    // Number of small-window events to report
+	SmallWindowSize      = 1024 // Window size considered "small"
+	OutOfOrderMinCount   = 10   // Minimum OOO packets to report
+	OutOfOrderMinPercent = 2.0  // Minimum OOO percentage to report
 )
 
 // TCPAdvancedAnalyzer detects TCP window issues and out-of-order packets
@@ -24,13 +24,13 @@ type TCPAdvancedAnalyzer struct {
 }
 
 type tcpWindowTracker struct {
-	SrcIP       string
-	DstIP       string
-	SrcPort     uint16
-	DstPort     uint16
-	ZeroCount   int
-	SmallCount  int
-	LastWindow  uint16
+	SrcIP      string
+	DstIP      string
+	SrcPort    uint16
+	DstPort    uint16
+	ZeroCount  int
+	SmallCount int
+	LastWindow uint16
 }
 
 type tcpOOOTracker struct {

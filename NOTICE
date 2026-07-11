@@ -1,0 +1,21 @@
+TraceSleuth
+Copyright for new TraceSleuth contributions is held by their respective contributors.
+
+TraceSleuth originated from the MIT-licensed SD-WAN Triage project by Gocisse.
+
+Original project:
+  SD-WAN Triage
+  https://github.com/gocisse/sdwan-triage
+
+Exact imported upstream baseline:
+  43c6cd412860a5219577be6d30feca2db7f57309
+
+Nearest preceding upstream release tag:
+  v6.2.0.0
+  2855ef6d1cd26909e70e60b893c13341efab9767
+
+The original MIT copyright and permission notice are preserved in LICENSE.
+
+TraceSleuth is an independent downstream project. It is not represented as an official continuation, endorsed version, or replacement maintained by the original SD-WAN Triage author.
+
+See UPSTREAM.md and docs/history/ORIGIN.md for the complete provenance record.

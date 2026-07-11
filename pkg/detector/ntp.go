@@ -11,36 +11,36 @@ import (
 
 // NTP constants
 const (
-	NTPPortNum               = 123
-	NTPAmplificationMinSize  = 468  // Monlist response is typically 468+ bytes
+	NTPPortNum                = 123
+	NTPAmplificationMinSize   = 468 // Monlist response is typically 468+ bytes
 	NTPAmplificationThreshold = 10  // Number of large NTP responses to flag
 	NTPStratumChangeThreshold = 3   // Number of stratum changes to flag
 )
 
 // NTP mode constants
 const (
-	NTPModeClient          = 3
-	NTPModeServer          = 4
-	NTPModeBroadcast       = 5
-	NTPModeControl         = 6
-	NTPModePrivate         = 7 // Used for monlist
+	NTPModeClient    = 3
+	NTPModeServer    = 4
+	NTPModeBroadcast = 5
+	NTPModeControl   = 6
+	NTPModePrivate   = 7 // Used for monlist
 )
 
 // NTPAnalyzer handles NTP packet analysis
 type NTPAnalyzer struct {
-	servers          map[string]*ntpServerInfo
-	largeResponses   map[string]int // IP -> count of large responses
-	lastReset        time.Time
+	servers        map[string]*ntpServerInfo
+	largeResponses map[string]int // IP -> count of large responses
+	lastReset      time.Time
 }
 
 type ntpServerInfo struct {
-	IP           string
-	Stratum      uint8
-	PrevStratum  uint8
+	IP             string
+	Stratum        uint8
+	PrevStratum    uint8
 	StratumChanges int
-	FirstSeen    time.Time
-	LastSeen     time.Time
-	PacketCount  int
+	FirstSeen      time.Time
+	LastSeen       time.Time
+	PacketCount    int
 }
 
 // NewNTPAnalyzer creates a new NTP analyzer
@@ -151,10 +151,10 @@ func (n *NTPAnalyzer) trackServer(serverIP string, stratum uint8, timestamp time
 	server, exists := n.servers[serverIP]
 	if !exists {
 		n.servers[serverIP] = &ntpServerInfo{
-			IP:        serverIP,
-			Stratum:   stratum,
-			FirstSeen: timestamp,
-			LastSeen:  timestamp,
+			IP:          serverIP,
+			Stratum:     stratum,
+			FirstSeen:   timestamp,
+			LastSeen:    timestamp,
 			PacketCount: 1,
 		}
 		return

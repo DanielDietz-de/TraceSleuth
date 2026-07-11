@@ -62,7 +62,7 @@ func TestDHCPAnalyzer_StarvationDetection(t *testing.T) {
 
 	// Send DHCPStarvationThreshold DISCOVER packets from same MAC
 	for i := 0; i < DHCPStarvationThreshold; i++ {
-		ts := float64(now.Add(time.Duration(i) * time.Millisecond).UnixNano()) / 1e9
+		ts := float64(now.Add(time.Duration(i)*time.Millisecond).UnixNano()) / 1e9
 		d.trackDiscover(mac, now.Add(time.Duration(i)*time.Millisecond), ts, report)
 	}
 
@@ -93,7 +93,7 @@ func TestDHCPAnalyzer_BelowStarvationThreshold(t *testing.T) {
 	mac := "de:ad:be:ef:00:02"
 
 	for i := 0; i < DHCPStarvationThreshold-1; i++ {
-		ts := float64(now.Add(time.Duration(i) * time.Millisecond).UnixNano()) / 1e9
+		ts := float64(now.Add(time.Duration(i)*time.Millisecond).UnixNano()) / 1e9
 		d.trackDiscover(mac, now.Add(time.Duration(i)*time.Millisecond), ts, report)
 	}
 
@@ -108,7 +108,7 @@ func TestDHCPAnalyzer_NAKStormDetection(t *testing.T) {
 	now := time.Now()
 
 	for i := 0; i < DHCPNAKStormThreshold; i++ {
-		ts := float64(now.Add(time.Duration(i) * time.Millisecond).UnixNano()) / 1e9
+		ts := float64(now.Add(time.Duration(i)*time.Millisecond).UnixNano()) / 1e9
 		d.trackNAK("192.168.1.1", now.Add(time.Duration(i)*time.Millisecond), ts, report)
 	}
 

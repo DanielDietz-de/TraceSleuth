@@ -25,8 +25,8 @@ const (
 	DHCPInform   = 8
 
 	// Thresholds
-	DHCPStarvationThreshold = 50  // Discover packets from same MAC in window
-	DHCPNAKStormThreshold   = 10  // NAKs in detection window
+	DHCPStarvationThreshold = 50 // Discover packets from same MAC in window
+	DHCPNAKStormThreshold   = 10 // NAKs in detection window
 	DHCPDetectionWindowSec  = 60.0
 )
 
@@ -40,11 +40,11 @@ type DHCPAnalyzer struct {
 }
 
 type dhcpServerInfo struct {
-	IP          string
-	MAC         string
-	OfferCount  int
-	FirstSeen   time.Time
-	LastSeen    time.Time
+	IP         string
+	MAC        string
+	OfferCount int
+	FirstSeen  time.Time
+	LastSeen   time.Time
 }
 
 type dhcpFloodCounter struct {

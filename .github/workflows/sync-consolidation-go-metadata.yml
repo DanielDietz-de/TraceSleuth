@@ -1,6 +1,9 @@
 name: Sync consolidation Go metadata
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - consolidation/tracesleuth-0.1.0
@@ -14,7 +17,10 @@ concurrency:
 
 jobs:
   sync:
-    if: github.repository == 'DanielDietz-de/TraceSleuth'
+    if: >-
+      github.repository == 'DanielDietz-de/TraceSleuth' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.head_ref == 'consolidation/tracesleuth-0.1.0'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout consolidation branch

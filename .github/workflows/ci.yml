@@ -40,8 +40,39 @@ jobs:
             bash scripts/check-repository-hygiene.sh
           fi
 
+  frontend-dist:
+    name: Frontend build artifact
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Install dependencies and build
+        working-directory: web/frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Upload frontend distribution
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dist
+          path: web/frontend/dist
+          if-no-files-found: error
+          retention-days: 1
+
   go-quality:
     name: Go format, vet, and tests
+    needs: frontend-dist
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -49,6 +80,12 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+
+      - name: Restore built frontend for Go embed
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: cmd/sdwan-triage/dist
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -132,12 +169,19 @@ jobs:
 
   go-race:
     name: Go race tests
+    needs: frontend-dist
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@v7
         with:
           persist-credentials: false
+
+      - name: Restore built frontend for Go embed
+        uses: actions/download-artifact@v8
+        with:
+          name: frontend-dist
+          path: cmd/sdwan-triage/dist
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -225,6 +269,7 @@ jobs:
 
   embedded-build:
     name: Embedded frontend and backend build
+    needs: frontend-dist
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -232,30 +277,17 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
+      - name: Restore built frontend for Go embed
+        uses: actions/download-artifact@v8
         with:
-          node-version: '24'
-          cache: npm
-          cache-dependency-path: web/frontend/package-lock.json
+          name: frontend-dist
+          path: cmd/sdwan-triage/dist
 
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
           cache-dependency-path: go.sum
-
-      - name: Build frontend
-        working-directory: web/frontend
-        run: |
-          npm ci
-          npm run build
-
-      - name: Stage embedded frontend
-        run: |
-          rm -rf cmd/sdwan-triage/dist
-          mkdir -p cmd/sdwan-triage/dist
-          cp -R web/frontend/dist/. cmd/sdwan-triage/dist/
 
       - name: Build TraceSleuth binary
         run: |

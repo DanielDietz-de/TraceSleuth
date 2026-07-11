@@ -70,9 +70,42 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  go-module-metadata:
+    name: Generate Go module metadata
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Generate canonical module metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          go mod tidy
+          mkdir -p module-metadata
+          cp go.mod go.sum module-metadata/
+
+      - name: Upload Go module metadata
+        uses: actions/upload-artifact@v7
+        with:
+          name: go-module-metadata
+          path: module-metadata
+          if-no-files-found: error
+          retention-days: 1
+
   go-quality:
     name: Go format, vet, and tests
-    needs: frontend-dist
+    needs:
+      - frontend-dist
+      - go-module-metadata
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -86,6 +119,17 @@ jobs:
         with:
           name: frontend-dist
           path: cmd/sdwan-triage/dist
+
+      - name: Restore synchronized Go module metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: go-module-metadata
+          path: .
+
+      - name: Prepare GeoIP embed input
+        run: |
+          mkdir -p cmd/sdwan-triage/data
+          cp data/GeoLite2-City.mmdb cmd/sdwan-triage/data/GeoLite2-City.mmdb
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -169,7 +213,9 @@ jobs:
 
   go-race:
     name: Go race tests
-    needs: frontend-dist
+    needs:
+      - frontend-dist
+      - go-module-metadata
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -182,6 +228,17 @@ jobs:
         with:
           name: frontend-dist
           path: cmd/sdwan-triage/dist
+
+      - name: Restore synchronized Go module metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: go-module-metadata
+          path: .
+
+      - name: Prepare GeoIP embed input
+        run: |
+          mkdir -p cmd/sdwan-triage/data
+          cp data/GeoLite2-City.mmdb cmd/sdwan-triage/data/GeoLite2-City.mmdb
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -269,7 +326,9 @@ jobs:
 
   embedded-build:
     name: Embedded frontend and backend build
-    needs: frontend-dist
+    needs:
+      - frontend-dist
+      - go-module-metadata
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -282,6 +341,17 @@ jobs:
         with:
           name: frontend-dist
           path: cmd/sdwan-triage/dist
+
+      - name: Restore synchronized Go module metadata
+        uses: actions/download-artifact@v8
+        with:
+          name: go-module-metadata
+          path: .
+
+      - name: Prepare GeoIP embed input
+        run: |
+          mkdir -p cmd/sdwan-triage/data
+          cp data/GeoLite2-City.mmdb cmd/sdwan-triage/data/GeoLite2-City.mmdb
 
       - name: Set up Go
         uses: actions/setup-go@v6

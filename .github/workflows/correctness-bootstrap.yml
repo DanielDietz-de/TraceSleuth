@@ -1,0 +1,92 @@
+name: TraceSleuth bootstrap correctness fixes
+
+on:
+  push:
+    branches:
+      - agent/tracesleuth-phase-0-bootstrap
+
+permissions:
+  contents: write
+
+jobs:
+  apply-correctness-fixes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/tracesleuth-phase-0-bootstrap
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.12'
+          cache: true
+
+      - name: Apply exact reviewed correctness fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+              "pkg/analyzer/tls_decrypt.go": [(
+                  "\tversion := uint16(data[1])<<8 | uint16(data[2])\n\trecordLen := int(data[3])<<4<<4 | int(data[4])\n\trecordLen = int(binary.BigEndian.Uint16(data[3:5]))\n",
+                  "\tversion := uint16(data[1])<<8 | uint16(data[2])\n\trecordLen := int(binary.BigEndian.Uint16(data[3:5]))\n",
+              )],
+              "pkg/detector/lan_protocols.go": [(
+                  "\t\tswitch tlvType {\n\t\tcase 0: // End of LLDPDU\n\t\t\tbreak\n",
+                  "\t\tswitch tlvType {\n\t\tcase 0: // End of LLDPDU\n",
+              )],
+              "pkg/detector/bgp_test.go": [(
+                  "\tif analyzer == nil {\n\t\tt.Error(\"NewBGPAnalyzer returned nil\")\n\t}\n\tif analyzer.bgpSessions == nil {\n",
+                  "\tif analyzer == nil {\n\t\tt.Fatal(\"NewBGPAnalyzer returned nil\")\n\t}\n\tif analyzer.bgpSessions == nil {\n",
+              )],
+              "pkg/detector/tunnel_test.go": [(
+                  "\tif analyzer == nil {\n\t\tt.Error(\"NewTunnelAnalyzer returned nil\")\n\t}\n\tif analyzer.tunnels == nil {\n",
+                  "\tif analyzer == nil {\n\t\tt.Fatal(\"NewTunnelAnalyzer returned nil\")\n\t}\n\tif analyzer.tunnels == nil {\n",
+              )],
+          }
+
+          for relative_path, changes in replacements.items():
+              path = Path(relative_path)
+              text = path.read_text()
+              for old, new in changes:
+                  matches = text.count(old)
+                  if matches != 1:
+                      raise SystemExit(
+                          f"{relative_path}: expected exactly one reviewed match, found {matches}"
+                      )
+                  text = text.replace(old, new, 1)
+              path.write_text(text)
+          PY
+
+          gofmt -w \
+            pkg/analyzer/tls_decrypt.go \
+            pkg/detector/lan_protocols.go \
+            pkg/detector/bgp_test.go \
+            pkg/detector/tunnel_test.go
+
+      - name: Run focused tests
+        run: go test ./pkg/analyzer ./pkg/detector -timeout 5m
+
+      - name: Remove bootstrap workflow and commit exact fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/correctness-bootstrap.yml
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+
+          if git diff --cached --quiet --exit-code; then
+            echo 'No correctness changes remain.'
+            exit 0
+          fi
+
+          git commit -m 'fix: resolve inherited Staticcheck correctness findings'
+          git push origin HEAD:agent/tracesleuth-phase-0-bootstrap

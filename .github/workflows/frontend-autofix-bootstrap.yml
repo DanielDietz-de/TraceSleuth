@@ -1,0 +1,56 @@
+name: TraceSleuth bootstrap frontend deterministic autofixes
+
+on:
+  push:
+    branches:
+      - agent/tracesleuth-phase-0-bootstrap
+
+permissions:
+  contents: write
+
+jobs:
+  apply-eslint-autofixes:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    defaults:
+      run:
+        working-directory: web/frontend
+
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: agent/tracesleuth-phase-0-bootstrap
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Apply only deterministic ESLint autofixes to reviewed files
+        run: npx eslint src/components/NetworkTopology.tsx src/data/vendorRunbooks.ts --fix
+
+      - name: Remove bootstrap workflow and commit exact autofixes
+        working-directory: .
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -f .github/workflows/frontend-autofix-bootstrap.yml
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+
+          if git diff --cached --quiet --exit-code; then
+            echo 'No deterministic frontend autofixes were needed.'
+            exit 0
+          fi
+
+          git commit -m 'style: apply deterministic frontend lint autofixes'
+          git push origin HEAD:agent/tracesleuth-phase-0-bootstrap

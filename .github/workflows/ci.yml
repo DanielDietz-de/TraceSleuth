@@ -112,7 +112,20 @@ jobs:
           retention-days: 14
 
       - name: Go vet
-        run: go vet ./...
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p build/ci
+          go vet ./... 2>&1 | tee build/ci/go-vet-diagnostics.txt
+
+      - name: Upload Go vet diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: go-vet-diagnostics
+          path: build/ci/go-vet-diagnostics.txt
+          if-no-files-found: ignore
+          retention-days: 14
 
       - name: Go tests
         run: go test ./... -timeout 120s

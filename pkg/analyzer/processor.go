@@ -200,6 +200,7 @@ func (p *Processor) logWarning(format string, args ...interface{}) {
 // and pcapgo.NgReader do).
 func (p *Processor) Process(reader PacketReader, state *models.AnalysisState, report *models.TriageReport, filter *models.Filter) error {
 	packetCount := 0
+	consecutiveReadErrors := 0
 	startTime := time.Now()
 
 	for {
@@ -208,15 +209,20 @@ func (p *Processor) Process(reader PacketReader, state *models.AnalysisState, re
 			break
 		}
 		if err != nil {
-			// Don't fail on individual packet read errors, log and continue
+			// A permanently faulty capture reader must never spin indefinitely.
+			consecutiveReadErrors++
 			p.errorCount++
 			if p.errorCount <= 5 {
 				p.logWarning("Error reading packet %d: %v", packetCount+1, err)
 			} else if p.errorCount == 6 {
 				p.logWarning("Suppressing further packet read errors...")
 			}
+			if consecutiveReadErrors >= 5 {
+				return fmt.Errorf("aborting after five consecutive packet record errors: %w", err)
+			}
 			continue
 		}
+		consecutiveReadErrors = 0
 
 		// Early filter check: Apply filter before packet creation for performance
 		// This avoids expensive packet parsing for filtered packets
@@ -254,7 +260,7 @@ func (p *Processor) Process(reader PacketReader, state *models.AnalysisState, re
 		// Progress indicator every 10000 packets
 		if packetCount%10000 == 0 {
 			elapsed := time.Since(startTime)
-			fmt.Printf("\rProcessed %d packets (%.0f pps)...", packetCount, float64(packetCount)/elapsed.Seconds())
+			fmt.Fprintf(os.Stderr, "\rProcessed %d packets (%.0f pps)...", packetCount, float64(packetCount)/elapsed.Seconds())
 
 			// OOM guard: abort if heap usage exceeds MaxHeapBytes (default 1 GB)
 			var memStats runtime.MemStats
@@ -276,7 +282,7 @@ func (p *Processor) Process(reader PacketReader, state *models.AnalysisState, re
 	}
 
 	// Print summary
-	fmt.Printf("\rProcessed %d packets in %v\n", packetCount, time.Since(startTime).Round(time.Millisecond))
+	fmt.Fprintf(os.Stderr, "\rProcessed %d packets in %v\n", packetCount, time.Since(startTime).Round(time.Millisecond))
 
 	// Report any issues encountered
 	if p.skippedPackets > 0 || p.errorCount > 0 {

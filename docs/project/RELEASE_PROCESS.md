@@ -181,8 +181,13 @@ silently replaced.
 Signed maintainer tags are preferred. When publication is initiated on
 `main` without a signed tag, GitHub's release API creates a lightweight
 version tag at the exact validated release SHA, using the scoped
-GitHub Actions token. This is an explicitly documented pre-1.0 alternative,
-not a claim that the tag is GPG-signed.
+GitHub Actions token. The release job atomically creates the tag if absent
+and validates that its resolved commit equals the exact green release SHA.
+For signed annotated tags, it resolves the tag object to the underlying
+commit; any mismatch fails before publication. A repeated run may reuse an
+existing tag only when it identifies that same green commit. This is an
+explicitly documented pre-1.0 alternative, not a claim that the tag is
+GPG-signed.
 
 ## Rollback and withdrawn releases
 

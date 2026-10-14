@@ -6,13 +6,13 @@ TraceSleuth is an open-source PCAP analysis platform that automatically detects 
 
 > **Primary product promise:** Upload or analyze a packet capture and receive evidence-backed findings showing what appears wrong, why TraceSleuth reached that conclusion, which packets support it, how confident the diagnosis is, what alternative explanations exist, and how to validate the result independently.
 
-[![Version](https://img.shields.io/badge/version-0.1.1-blue)](VERSION)
+[![Version](https://img.shields.io/badge/version-0.2.0-blue)](VERSION)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Maturity](https://img.shields.io/badge/maturity-bootstrap%20%2F%20pre--1.0-orange)](ROADMAP.md)
 
 ## Current maturity
 
-**TraceSleuth 0.1.1 is a bootstrap and architecture-foundation release line. It is not yet production-ready.**
+**TraceSleuth 0.2.0 introduces initial capture-integrity preflight in the CLI and web workflow. It is not yet production-ready.**
 
 The repository was imported from the MIT-licensed [SD-WAN Triage](https://github.com/gocisse/sdwan-triage) project and already contains substantial inherited PCAP analysis, web, CLI, packet inspection, reporting, protocol analysis, timeline, voice, security, and streaming comparison functionality.
 
@@ -116,11 +116,11 @@ The initial stable TraceSleuth detector catalogue has **not yet been declared**.
 
 | Domain | Current status | Notes |
 |---|---|---|
-| PCAP/PCAPNG reader | Implemented in inherited baseline | Magic-value detection and `pcapgo` readers exist; first-class capture-quality preflight remains roadmap work. |
+| PCAP/PCAPNG reader | Implemented in inherited baseline | Magic-value detection and `pcapgo` readers exist; initial capture-quality preflight reports SHA-256, PCAP/PCAPNG metadata, truncation and timestamp limitations; duplication diagnosis remains planned. |
 | TCP analysis | Inherited / under validation | Handshake, retransmission, RTT, zero-window, small-window, and simplified out-of-order logic exist; evidence and false-positive controls require migration. |
 | DNS/DHCP/NTP | Inherited / under validation | Existing heuristics are documented in the baseline audit; categorical conclusions are being replaced with evidence-backed semantics. |
 | VRRP/HSRP/STP/CDP/LLDP | Inherited / under validation | Basic combined LAN-protocol analysis exists; deeper protocol-specific state analysis remains planned. |
-| LACP | Planned | Not claimed implemented in 0.1.0. |
+| LACP | Planned | Not claimed implemented in 0.2.0. |
 | Capture duplication | Planned | Required before high-confidence loop/duplicate-forwarding diagnosis. |
 | Layer-2 loop engine | Planned | Must include adversarial SPAN/mirror false-positive fixtures. |
 | MLAG symptom inference | Planned | Will distinguish direct, strong indirect, and weak indirect evidence. |
@@ -129,9 +129,40 @@ The initial stable TraceSleuth detector catalogue has **not yet been declared**.
 
 See the [roadmap](ROADMAP.md) for phase acceptance criteria and the [baseline audit](docs/audits/INITIAL_BASELINE_AUDIT.md) for the source-level detector inventory.
 
+## Implemented capture preflight (0.2.0)
+
+Before running inherited network detectors, the CLI and authenticated web
+analysis now validate the capture structure. The JSON report contains a
+`capture_quality` object recording SHA-256, packet/byte counts, observed
+link types, per-interface metadata where available, truncation, reported
+capture drops and timestamp anomalies. The results UI displays this
+information separately from actual network findings.
+
+The preflight and detector pass share one open capture descriptor, with
+SHA-256 identity reverified after detection; a file modified in place fails
+rather than yielding findings tied to a stale capture hash. PCAPNG interface
+statistics and packet counts are preserved separately per section. Interface
+capture filters are retained in the JSON/UI and explicitly reduce asserted
+STP/LACP observability; observing Ethernet alone does not prove those control
+protocols were available through an active filter.
+
+CLI JSON output is exclusively machine-readable: both the single-capture
+analysis and the two-capture comparison emit one JSON document. Conflicting
+options that generate human-readable reports or a second export are rejected
+with an error on stderr. The CI/release smoke test verifies this contract.
+
+A degraded capture status describes limitations of the capture **only**;
+it is not proof that the live network has a fault. Empty and structurally
+truncated captures fail preflight rather than producing misleading findings.
+
+**Not yet implemented:** capture duplication/SPAN differentiation,
+detection-confidence penalties, full per-packet evidence provenance,
+generalized multi-capture trust, and validated Layer-2 loop inference.
+These remain release-blocking requirements for later milestones.
+
 ## Example target finding
 
-The following illustrates the intended output contract. It is **not** a claim that the final Layer-2 loop detector is already implemented in 0.1.0.
+The following illustrates the intended output contract. It is **not** a claim that the final Layer-2 loop detector is already implemented in 0.2.0.
 
 ```text
 CRITICAL — Probable Layer-2 forwarding loop

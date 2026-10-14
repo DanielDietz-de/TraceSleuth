@@ -16,7 +16,8 @@ Primary promise:
 
 ## Current status
 
-**Current version line:** `0.1.1` bootstrap
+**Current version line:** `0.2.0` bootstrap
+
 **Production status:** not production-ready  
 **Stable detector catalogue:** not yet established  
 **Target stable release:** `1.0.0`
@@ -76,13 +77,13 @@ Primary promise:
 - [ ] complete controlled runtime rename to `tracesleuth`
 - [ ] update Go module path without breaking imports
 - [ ] migrate product-facing UI title, API metadata, reports and storage names
-- [ ] establish full project README
+- [x] establish full project README
 - [ ] add visible About/upstream attribution in UI
-- [ ] add normal CI workflow
-- [ ] add static analysis/security workflows
-- [ ] add repository hygiene/version alignment tests
-- [ ] remove universal default credentials
-- [ ] replace JWT fallback secret with fail-closed behavior
+- [x] add normal CI workflow
+- [x] add static analysis/security workflows
+- [x] add repository hygiene/version alignment tests
+- [x] remove universal default credentials
+- [x] replace JWT fallback secret with fail-closed behavior
 
 ### Acceptance criteria
 
@@ -92,6 +93,21 @@ Primary promise:
 - general CI runs on pull requests and pushes;
 - inherited security defects are either fixed or explicitly block production claims;
 - documentation clearly distinguishes implemented versus planned capability.
+
+## 0.2.0 implementation checkpoint
+
+The initial preflight component is implemented for CLI and authenticated web:
+capture format, SHA-256 identity, PCAP/PCAPNG interface/packet metadata,
+packet truncation, timestamp disorder, observed link layers, reported drops,
+multi-section PCAPNG interface attribution, filter-derived observability
+limitations, and clean rejection of malformed/empty captures. The web UI renders the
+observed status and limitations; positive, negative and malformed tests
+are provided.
+
+**Phase 2 is not complete:** capture duplication and SPAN/broker
+differentiation, downstream confidence penalties, and the complete
+capability-aware detector contract remain open. Do not infer that
+0.2.0 satisfies every Phase 2 acceptance criterion.
 
 ## Phase 2 — Capture trust
 

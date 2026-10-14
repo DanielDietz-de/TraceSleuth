@@ -9,12 +9,78 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
 ### Planned
 
 - Complete remaining product-identity migration for inherited runtime source paths, frontend strings, API metadata, and configuration/storage names.
-- Capture-quality preflight and capture-duplication analysis.
+- Capture-duplication/SPAN/packet-broker differentiation and full capture capability propagation.
 - Normalized observation, finding, and evidence architecture implementation.
 - Layer-2 duplicate/storm/loop analysis.
 - STP, LACP, FHRP, and MLAG symptom analysis.
 - Generalized multi-capture correlation.
 - Retention, storage quotas, analysis resource limits, and comprehensive self-hosting hardening.
+
+## [0.2.0] - 2026-10-14
+
+### Added
+
+- Capture-integrity preflight executes before inherited fault detectors in
+  both the CLI and the authenticated web analysis path.
+- Report capture SHA-256, PCAP/PCAPNG format, per-interface metadata where
+  available, link types, packet totals and duration, truncation, observed
+  timestamp anomalies, and capture-reported packet drops.
+- Export a structured `capture_quality` result in the existing JSON report;
+  display capture observations and limitations in the React results UI.
+- Reject malformed/truncated/empty capture files during preflight; bound the
+  parser's recovery from repeated record-read errors.
+- Add synthetic PCAP/PCAPNG positive/negative tests, malformed-input tests,
+  result integration assertions and UI regression tests.
+
+### Review hardening
+
+- Pin preflight and detector processing to one open capture descriptor,
+  verifying the SHA-256 identity before and after packet analysis to reject
+  captures modified in place or replaced between passes.
+- Preserve per-section PCAPNG interfaces and packet counts instead of
+  incorrectly assigning earlier sections to the final section's interfaces.
+- Record interface capture filters, surface them in the UI, and suppress
+  unsupported STP/LACP visibility claims for filtered captures.
+- Prevent cancellation during the preflight scan from being overwritten by
+  late progress or result updates; add concurrent cancellation regression tests.
+- Keep single-capture and comparison JSON-mode output parseable as exactly
+  one document and reject conflicting export flags, with an executable
+  smoke gate in both CI and the release workflow.
+- Make analysis claims atomic: reject starting cancelled/failed jobs,
+  prevent duplicate starts, and keep failed status terminal against late
+  progress updates.
+- Propagate cancellation through report-generation checkpoints and finalize
+  the job before any external integration hooks (tickets/webhooks/metrics).
+- Treat absent PCAPNG interface-statistics blocks as unknown drop counts,
+  not falsely reported zero; add absent/zero/nonzero ISB regression fixtures.
+- Keep CLI usage and invalid-argument diagnostics on stderr for JSON mode,
+  including missing capture and unrecognized option failures.
+
+- Remove uncommitted JSON/HTML reports if cancellation or an analysis
+  failure wins during report generation; never recursively delete unrelated
+  files in the results directory.
+- Report completed/failed cancellation races as HTTP 409 conflicts instead
+  of incorrect HTTP 500 errors.
+- Reject malformed packet records in both sides of PCAP comparison rather
+  than treating parser errors as EOF and reporting misleading partial output.
+- Advertise Ethernet/VLAN/STP/LACP capture capabilities only when the usable
+  captured frame depth can accommodate the required headers; test shallow
+  snap-length PCAP fixtures.
+- Reject unsupported comparison export options rather than exit successfully
+  while silently ignoring requested CSV, HTML, PDF or simplified output.
+- Declare 0.2.x as the current supported prerelease security line and enforce
+  consistency between the support matrix and the root version contract.
+- Derive classic PCAP microsecond/nanosecond timestamp resolution from magic
+  bytes instead of the inverted value in the pinned gopacket reader.
+- Return sanitized comparison API errors with packet index and parser cause
+  but never expose randomized host-side temporary paths.
+
+### Remaining limitations
+
+- This is an **initial Phase 2 checkpoint**, not completed capture trust:
+  capture duplication/SPAN differentiation, downstream confidence penalties,
+  per-packet evidence references, and full capability-aware detector logic
+  remain planned. The product is still pre-production.
 
 ## [0.1.1] - 2026-10-14
 

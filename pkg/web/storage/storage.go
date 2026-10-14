@@ -6,6 +6,7 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -218,26 +219,78 @@ func (s *Storage) UpdateJob(job *AnalysisJob) error {
 	return nil
 }
 
+// Terminal analysis states cannot be overwritten by late progress workers.
+var (
+	ErrAnalysisCancelled       = errors.New("analysis cancelled")
+	ErrAnalysisFailed          = errors.New("analysis already failed")
+	ErrAnalysisNotStartable    = errors.New("analysis is not pending")
+	ErrAnalysisAlreadyFinished = errors.New("analysis already finished")
+)
+
+// BeginAnalysis atomically claims a pending job. It prevents duplicate
+// /analyze requests and races with cancellation before the worker starts.
+func (s *Storage) BeginAnalysis(id string) (*AnalysisJob, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	job, err := s.GetJob(id)
+	if err != nil {
+		return nil, err
+	}
+	if job.Status != StatusPending {
+		return nil, fmt.Errorf("%w: %s", ErrAnalysisNotStartable, job.Status)
+	}
+	job.Status = StatusAnalyzing
+	job.Progress = 0
+	job.CurrentStep = "Initializing analysis..."
+	if err := s.UpdateJob(job); err != nil {
+		return nil, err
+	}
+	return job, nil
+}
+
 // UpdateProgress updates job progress and notifies subscribers
 func (s *Storage) UpdateProgress(id string, progress int, currentStep string, estimatedTime int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	job, err := s.GetJob(id)
 	if err != nil {
 		return err
 	}
-
+	if job.Status == StatusCancelled {
+		return ErrAnalysisCancelled
+	}
+	if job.Status == StatusCompleted {
+		return fmt.Errorf("analysis already completed")
+	}
+	if job.Status == StatusFailed {
+		return ErrAnalysisFailed
+	}
 	job.Progress = progress
 	job.CurrentStep = currentStep
 	job.EstimatedTime = estimatedTime
 	job.Status = StatusAnalyzing
-
 	return s.UpdateJob(job)
 }
 
 // CompleteJob marks a job as completed
 func (s *Storage) CompleteJob(id, resultsPath, htmlPath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	job, err := s.GetJob(id)
 	if err != nil {
 		return err
+	}
+	if job.Status == StatusCancelled {
+		return ErrAnalysisCancelled
+	}
+	if job.Status == StatusFailed {
+		return ErrAnalysisFailed
+	}
+	if job.Status == StatusCompleted {
+		return nil
+	}
+	if job.Status != StatusAnalyzing {
+		return fmt.Errorf("%w: %s", ErrAnalysisNotStartable, job.Status)
 	}
 
 	now := time.Now()
@@ -254,9 +307,20 @@ func (s *Storage) CompleteJob(id, resultsPath, htmlPath string) error {
 
 // FailJob marks a job as failed
 func (s *Storage) FailJob(id, errorMsg string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	job, err := s.GetJob(id)
 	if err != nil {
 		return err
+	}
+	if job.Status == StatusCancelled {
+		return ErrAnalysisCancelled
+	}
+	if job.Status == StatusFailed {
+		return ErrAnalysisFailed
+	}
+	if job.Status == StatusCompleted {
+		return fmt.Errorf("analysis already completed")
 	}
 
 	now := time.Now()
@@ -270,9 +334,17 @@ func (s *Storage) FailJob(id, errorMsg string) error {
 
 // CancelJob marks a job as cancelled
 func (s *Storage) CancelJob(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	job, err := s.GetJob(id)
 	if err != nil {
 		return err
+	}
+	if job.Status == StatusCompleted || job.Status == StatusFailed {
+		return fmt.Errorf("%w: %s", ErrAnalysisAlreadyFinished, job.Status)
+	}
+	if job.Status == StatusCancelled {
+		return nil
 	}
 
 	now := time.Now()

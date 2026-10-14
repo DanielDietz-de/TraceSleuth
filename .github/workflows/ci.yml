@@ -293,3 +293,6 @@ jobs:
 
       - name: Verify build artifact
         run: test -s build/ci/tracesleuth
+
+      - name: CLI machine-readable output regression
+        run: bash scripts/test-cli-json.sh build/ci/tracesleuth

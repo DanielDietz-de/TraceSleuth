@@ -132,7 +132,14 @@ func (h *ComparisonHandlers) PostCompareUpload(c *gin.Context) {
 	comp.KeyLogPath = keyLogPath
 	report, err := comp.Compare(pathA, pathB)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Comparison failed: " + err.Error()})
+		// Keep server-owned randomized temp paths out of response bodies.
+		// Malformed packet errors carry a safe index and parser cause.
+		var malformed *analyzer.MalformedCaptureRecordError
+		if errors.As(err, &malformed) {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "Comparison failed: " + malformed.Error()})
+		} else {
+			c.JSON(http.StatusUnprocessableEntity, gin.H{"error": "Comparison failed: invalid or unreadable capture"})
+		}
 		return
 	}
 

@@ -253,24 +253,22 @@ func (h *Handlers) StartAnalysis(c *gin.Context) {
 		return
 	}
 
-	// Check if already running or completed
-	if job.Status == storage.StatusAnalyzing {
-		c.JSON(http.StatusConflict, gin.H{
-			"error": "Analysis already in progress",
-		})
+	// Only pending jobs may transition into analysis. Check and claim the
+	// state atomically with cancellation and competing start requests.
+	if job.Status != storage.StatusPending {
+		c.JSON(http.StatusConflict, gin.H{"error": fmt.Sprintf("Analysis is %s; only pending jobs may start", job.Status)})
 		return
 	}
-
-	if job.Status == storage.StatusCompleted {
-		c.JSON(http.StatusConflict, gin.H{
-			"error":       "Analysis already completed",
-			"results_url": fmt.Sprintf("/api/results/%s", id),
-		})
+	claimed, err := h.store.BeginAnalysis(id)
+	if err != nil {
+		if errors.Is(err, storage.ErrAnalysisNotStartable) {
+			c.JSON(http.StatusConflict, gin.H{"error": "Analysis is no longer pending"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to start analysis"})
+		}
 		return
 	}
-
-	// Start analysis in background
-	go h.runAnalysis(job)
+	go h.runAnalysis(claimed)
 
 	c.JSON(http.StatusAccepted, gin.H{
 		"id":      id,
@@ -308,16 +306,21 @@ func (h *Handlers) CancelAnalysis(c *gin.Context) {
 	}
 
 	if job.Status != storage.StatusAnalyzing {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Analysis is not running",
-		})
+		status := http.StatusBadRequest
+		if job.Status == storage.StatusCompleted || job.Status == storage.StatusFailed ||
+			job.Status == storage.StatusCancelled {
+			status = http.StatusConflict
+		}
+		c.JSON(status, gin.H{"error": "Analysis is not running", "status": job.Status})
 		return
 	}
 
 	if err := h.store.CancelJob(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to cancel analysis",
-		})
+		if errors.Is(err, storage.ErrAnalysisAlreadyFinished) {
+			c.JSON(http.StatusConflict, gin.H{"error": "Analysis completed before cancellation"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to cancel analysis"})
 		return
 	}
 
@@ -539,21 +542,13 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 
 // runAnalysis performs the actual PCAP analysis
 func (h *Handlers) runAnalysis(job *storage.AnalysisJob) {
-	// Update status to analyzing
-	job.Status = storage.StatusAnalyzing
-	job.Progress = 0
-	job.CurrentStep = "Initializing analysis..."
-	h.store.UpdateJob(job)
-
-	// Import and use the existing analyzer
-	resultsPath, htmlPath, err := h.performAnalysis(job)
+	// StartAnalysis already reserved this job in a cancellation-safe
+	// transition. The analyzer finalizes successful jobs before integration
+	// hooks; a delayed worker must not resurrect a cancelled or failed job.
+	_, _, err := h.performAnalysis(job)
 	if err != nil {
-		h.store.FailJob(job.ID, err.Error())
-		return
+		_ = h.store.FailJob(job.ID, err.Error())
 	}
-
-	// Mark as completed
-	h.store.CompleteJob(job.ID, resultsPath, htmlPath)
 }
 
 // performAnalysis runs the actual analysis using the existing engine

@@ -96,7 +96,7 @@ jobs:
               url="repos/${GITHUB_REPOSITORY}/actions/workflows/${flow}/runs?head_sha=${GITHUB_SHA}&event=push&per_page=100"
               state="$(gh api "$url" | jq -r --arg sha "$GITHUB_SHA" '
                 [.workflow_runs[] | select(.head_sha == $sha)] |
-                sort_by(.run_attempt) | last | (.conclusion // "pending")
+                sort_by(.id) | last | (.conclusion // "pending")
               ')"
               printf '%s exact SHA=%s result=%s\n' "$flow" "$GITHUB_SHA" "$state"
               case "$state" in
@@ -123,11 +123,6 @@ jobs:
           tag='${{ steps.version.outputs.tag }}'
           if gh release view "$tag" >/dev/null 2>&1; then
             echo 'Release already exists for this version; refusing overwrite.' >&2
-            exit 1
-          fi
-          if [[ "$GITHUB_REF" == refs/heads/main ]] &&
-             git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
-            echo 'Version tag already exists; use the tagged release path.' >&2
             exit 1
           fi
 
@@ -246,12 +241,44 @@ jobs:
           start = next(i for i, line in enumerate(lines) if line.startswith('## [' + version + ']'))
           end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith('## [')), len(lines))
           notes = '\n'.join(lines[start:end]).strip()
-          if not notes or 'Remaining limitations' not in notes:
-              raise SystemExit('Release notes must state remaining limitations')
-          Path('build/release-notes.md').write_text(
-              '**Pre-1.0 prerelease: not production-ready.**\n\n' + notes + '\n'
-          )
+          major = int(version.split('.')[0])
+          if not notes:
+              raise SystemExit('Cannot publish a release with no changelog')
+          if major == 0:
+              if not any(section in notes for section in ('### Remaining limitations', '### Compatibility')):
+                  raise SystemExit('Pre-1.0 prerelease notes must disclose limitations or compatibility restrictions')
+              notes = '**Pre-1.0 prerelease: not production-ready.**\n\n' + notes
+          Path('build/release-notes.md').write_text(notes + '\n')
           PYCODE
+
+      - name: Pin release tag to the exact validated commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='${{ steps.version.outputs.tag }}'
+          ref_route="repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}"
+          if ! ref_json="$(gh api "$ref_route" 2>/dev/null)"; then
+            # Atomic create: GitHub refuses to replace an existing tag.
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f "ref=refs/tags/$tag" -f "sha=$GITHUB_SHA" >/dev/null
+            ref_json="$(gh api "$ref_route")"
+          fi
+          ref_type="$(jq -r '.object.type' <<<"$ref_json")"
+          ref_sha="$(jq -r '.object.sha' <<<"$ref_json")"
+          if [[ "$ref_type" == tag ]]; then
+            # Respect and validate maintainer-signed annotated tags.
+            tag_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/$ref_sha")"
+            ref_type="$(jq -r '.object.type' <<<"$tag_json")"
+            ref_sha="$(jq -r '.object.sha' <<<"$tag_json")"
+          fi
+          if [[ "$ref_type" != commit || "$ref_sha" != "$GITHUB_SHA" ]]; then
+            printf 'Tag %s points to %s (%s), expected commit %s\n' \
+              "$tag" "$ref_sha" "$ref_type" "$GITHUB_SHA" >&2
+            exit 1
+          fi
+          echo "Tag $tag is pinned to validated commit $GITHUB_SHA"
 
       - name: Create GitHub release
         env:
@@ -272,4 +299,5 @@ jobs:
             --title 'TraceSleuth ${{ steps.version.outputs.tag }}' \
             --notes-file build/release-notes.md \
             --target "$GITHUB_SHA" \
+            --verify-tag \
             "${prerelease_args[@]}"

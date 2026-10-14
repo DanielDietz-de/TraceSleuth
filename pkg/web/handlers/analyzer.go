@@ -15,6 +15,7 @@ import (
 	"github.com/gocisse/sdwan-triage/pkg/models"
 	"github.com/gocisse/sdwan-triage/pkg/output"
 	"github.com/gocisse/sdwan-triage/pkg/web/storage"
+	"github.com/google/uuid"
 )
 
 // WebResultsWrapper wraps TriageReport with metadata fields expected by the frontend
@@ -124,12 +125,17 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 		return "", "", err
 	}
 
-	// Create results directory
+	// Reject corrupted persisted job IDs before constructing output paths.
+	if _, err := uuid.Parse(job.ID); err != nil {
+		return "", "", fmt.Errorf("invalid analysis job identifier: %w", err)
+	}
 	resultsDir := filepath.Join(store.GetResultsDir(), job.ID)
 	if err := os.MkdirAll(resultsDir, 0700); err != nil {
 		log.Printf("[ANALYSIS] Failed to create results directory: %v", err)
 		return "", "", fmt.Errorf("failed to create results directory: %w", err)
 	}
+	artifacts := newReportArtifacts(resultsDir)
+	defer artifacts.rollbackUnlessPublished()
 
 	// Count packets from the report data
 	packetCount := int(quality.PacketCount)
@@ -147,7 +153,7 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 	}
 
 	// Save JSON results with metadata
-	jsonPath := filepath.Join(resultsDir, "results.json")
+	jsonPath := artifacts.jsonPath
 	jsonData, err := json.MarshalIndent(webResults, "", "  ")
 	if err != nil {
 		log.Printf("[ANALYSIS] Failed to marshal results: %v", err)
@@ -165,7 +171,7 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 	}
 
 	// Generate HTML report
-	htmlPath := filepath.Join(resultsDir, "report.html")
+	htmlPath := artifacts.htmlPath
 	if err := output.GenerateHTMLReport(report, htmlPath, "enterprise"); err != nil {
 		log.Printf("[ANALYSIS] Failed to generate HTML report: %v", err)
 		return "", "", fmt.Errorf("failed to generate HTML report: %w", err)
@@ -179,6 +185,7 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 	if err := store.CompleteJob(job.ID, jsonPath, htmlPath); err != nil {
 		return "", "", err
 	}
+	artifacts.published = true
 	log.Printf("[ANALYSIS] Analysis completed successfully for job: %s", job.ID)
 	runPostAnalysisHooks(intCfg, report, job, analysisDuration)
 	return jsonPath, htmlPath, nil

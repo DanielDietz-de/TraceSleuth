@@ -56,6 +56,17 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
 - Keep CLI usage and invalid-argument diagnostics on stderr for JSON mode,
   including missing capture and unrecognized option failures.
 
+- Remove uncommitted JSON/HTML reports if cancellation or an analysis
+  failure wins during report generation; never recursively delete unrelated
+  files in the results directory.
+- Report completed/failed cancellation races as HTTP 409 conflicts instead
+  of incorrect HTTP 500 errors.
+- Reject malformed packet records in both sides of PCAP comparison rather
+  than treating parser errors as EOF and reporting misleading partial output.
+- Advertise Ethernet/VLAN/STP/LACP capture capabilities only when the usable
+  captured frame depth can accommodate the required headers; test shallow
+  snap-length PCAP fixtures.
+
 ### Remaining limitations
 
 - This is an **initial Phase 2 checkpoint**, not completed capture trust:

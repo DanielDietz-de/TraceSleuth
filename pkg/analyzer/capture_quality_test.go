@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -365,6 +366,50 @@ func TestInspectCapturePCAPNGDropStatisticsUnknownVsReported(t *testing.T) {
 			}
 			if test.drops > 0 && q.Status != "degraded" {
 				t.Fatalf("reported drops did not degrade capture quality: %+v", q)
+			}
+		})
+	}
+}
+
+// Link type alone cannot prove protocol visibility. The packet snapshot must
+// retain enough bytes for the relevant header before a capability is claimed.
+func TestInspectCaptureGatesCapabilitiesByUsableEthernetDepth(t *testing.T) {
+	for _, tc := range []struct {
+		name            string
+		snapLen, capLen uint32
+		want            []string
+	}{
+		{"ethernet header only", 14, 14, []string{"ethernet"}},
+		{"ethernet with vlan tag", 18, 18, []string{"ethernet", "vlan"}},
+		{"ethernet with stp depth", 54, 54, []string{"ethernet", "vlan", "stp_bpdu"}},
+		{"ethernet with full lacp depth", 124, 124, []string{"ethernet", "vlan", "stp_bpdu", "lacp_slow_protocols"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buffer bytes.Buffer
+			writer := pcapgo.NewWriter(&buffer)
+			if err := writer.WriteFileHeader(tc.snapLen, layers.LinkTypeEthernet); err != nil {
+				t.Fatal(err)
+			}
+			frame := make([]byte, tc.capLen)
+			if err := writer.WritePacket(gopacket.CaptureInfo{
+				Timestamp:     time.Unix(1_234, 0),
+				CaptureLength: int(tc.capLen), Length: 124,
+			}, frame); err != nil {
+				t.Fatal(err)
+			}
+			file := filepath.Join(t.TempDir(), "short.pcap")
+			if err := os.WriteFile(file, buffer.Bytes(), 0600); err != nil {
+				t.Fatal(err)
+			}
+			q, err := InspectCapture(file)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(q.Capabilities, tc.want) {
+				t.Fatalf("capabilities %v, want %v; quality %+v", q.Capabilities, tc.want, q)
+			}
+			if tc.snapLen < minSTPBPDUDepth && q.Status != "degraded" {
+				t.Fatalf("shallow Ethernet capture must be degraded: %+v", q)
 			}
 		})
 	}

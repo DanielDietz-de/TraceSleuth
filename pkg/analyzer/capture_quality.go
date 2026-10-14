@@ -14,6 +14,15 @@ import (
 	"github.com/google/gopacket/pcapgo"
 )
 
+// Minimum complete on-wire byte depths for protocol observability. A link
+// type by itself cannot establish that a capture retains protocol headers.
+const (
+	minEthernetFrameDepth uint32 = 14
+	minVLANTagDepth       uint32 = 18
+	minSTPBPDUDepth       uint32 = 52  // Ethernet + 802.3 LLC + standard BPDU
+	minLACPDUDepth        uint32 = 124 // Ethernet + LACPDU
+)
+
 const timestampGapThreshold = 30 * time.Second
 
 // InspectCapture is the metadata-only form of InspectCaptureAndOpen. The
@@ -58,6 +67,8 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 	}
 	linkTypeSet := map[string]bool{}
 	interfacePackets := map[int]uint64{}
+	interfaceDepth := map[int]uint32{}
+	var usableEthernetDepth uint32
 	section := 0
 	anyCaptureFilter := false
 	// An interface without an Interface Statistics Block has UNKNOWN drops,
@@ -70,6 +81,18 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 	// to the LAST section's interfaces.
 	finishSection := func(interfaces []pcapgo.NgInterface) {
 		for idx, iface := range interfaces {
+			if iface.LinkType == layers.LinkTypeEthernet && interfacePackets[idx] > 0 {
+				depth := interfaceDepth[idx]
+				// PCAPNG permits an unspecified snap length (0). In that
+				// case rely on actual captured lengths rather than treating
+				// the interface as incapable of recording any packet bytes.
+				if iface.SnapLength != 0 && iface.SnapLength < depth {
+					depth = iface.SnapLength
+				}
+				if depth > usableEthernetDepth {
+					usableEthernetDepth = depth
+				}
+			}
 			info := models.CaptureInterface{
 				SectionIndex: section,
 				Index:        idx, Name: iface.Name, LinkType: iface.LinkType.String(),
@@ -100,6 +123,7 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 		}
 		section++
 		interfacePackets = make(map[int]uint64)
+		interfaceDepth = make(map[int]uint32)
 		statsObserved = make(map[int]bool)
 	}
 
@@ -140,6 +164,9 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 			q.TruncatedPackets++
 		}
 		interfacePackets[ci.InterfaceIndex]++
+		if uint32(len(data)) > interfaceDepth[ci.InterfaceIndex] {
+			interfaceDepth[ci.InterfaceIndex] = uint32(len(data))
+		}
 		linkType := cap.Reader.LinkType()
 		for _, extra := range ci.AncillaryData {
 			if lt, ok := extra.(layers.LinkType); ok {
@@ -183,6 +210,12 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 		}
 		finishSection(interfaces)
 	} else if classic, ok := cap.Reader.(*pcapgo.Reader); ok {
+		if classic.LinkType() == layers.LinkTypeEthernet {
+			usableEthernetDepth = interfaceDepth[0]
+			if classic.Snaplen() != 0 && classic.Snaplen() < usableEthernetDepth {
+				usableEthernetDepth = classic.Snaplen()
+			}
+		}
 		q.Interfaces = append(q.Interfaces, models.CaptureInterface{
 			SectionIndex: 0, Index: 0, LinkType: classic.LinkType().String(),
 			SnapLength: classic.Snaplen(), TimestampResolution: fmt.Sprint(classic.Resolution()),
@@ -204,11 +237,26 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 	sort.Strings(q.LinkTypes)
 
 	if linkTypeSet[layers.LinkTypeEthernet.String()] {
-		q.Capabilities = append(q.Capabilities, "ethernet", "vlan")
-		// Interface filters may suppress every STP/LACP packet. Even a valid
-		// Ethernet capture with an active filter is not an unfiltered view.
-		if !anyCaptureFilter {
-			q.Capabilities = append(q.Capabilities, "stp_bpdu", "lacp_slow_protocols")
+		if usableEthernetDepth >= minEthernetFrameDepth {
+			q.Capabilities = append(q.Capabilities, "ethernet")
+		}
+		if usableEthernetDepth >= minVLANTagDepth {
+			q.Capabilities = append(q.Capabilities, "vlan")
+		}
+		// Packet filters may hide whole protocols even if the file has enough
+		// snap length to decode them. Only advertise *usable* capabilities.
+		if !anyCaptureFilter && usableEthernetDepth >= minSTPBPDUDepth {
+			q.Capabilities = append(q.Capabilities, "stp_bpdu")
+		}
+		if !anyCaptureFilter && usableEthernetDepth >= minLACPDUDepth {
+			q.Capabilities = append(q.Capabilities, "lacp_slow_protocols")
+		}
+		if usableEthernetDepth < minSTPBPDUDepth {
+			q.Status = "degraded"
+			q.Limitations = append(q.Limitations, models.CaptureQualityIssue{
+				Code: "insufficient_layer2_capture_depth", Severity: "warning",
+				Description: fmt.Sprintf("Only %d Ethernet bytes are usable; capture lacks enough packet depth to validate STP, LACP and potentially VLAN headers.", usableEthernetDepth),
+			})
 		}
 	} else {
 		q.Limitations = append(q.Limitations, models.CaptureQualityIssue{

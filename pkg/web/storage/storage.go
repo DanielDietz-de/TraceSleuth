@@ -221,9 +221,10 @@ func (s *Storage) UpdateJob(job *AnalysisJob) error {
 
 // Terminal analysis states cannot be overwritten by late progress workers.
 var (
-	ErrAnalysisCancelled    = errors.New("analysis cancelled")
-	ErrAnalysisFailed       = errors.New("analysis already failed")
-	ErrAnalysisNotStartable = errors.New("analysis is not pending")
+	ErrAnalysisCancelled       = errors.New("analysis cancelled")
+	ErrAnalysisFailed          = errors.New("analysis already failed")
+	ErrAnalysisNotStartable    = errors.New("analysis is not pending")
+	ErrAnalysisAlreadyFinished = errors.New("analysis already finished")
 )
 
 // BeginAnalysis atomically claims a pending job. It prevents duplicate
@@ -340,7 +341,7 @@ func (s *Storage) CancelJob(id string) error {
 		return err
 	}
 	if job.Status == StatusCompleted || job.Status == StatusFailed {
-		return fmt.Errorf("analysis already finished")
+		return fmt.Errorf("%w: %s", ErrAnalysisAlreadyFinished, job.Status)
 	}
 	if job.Status == StatusCancelled {
 		return nil

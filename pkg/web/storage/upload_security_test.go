@@ -305,3 +305,29 @@ func TestBeginAnalysisIsAtomicAndCancelledJobsCannotRestart(t *testing.T) {
 		t.Fatalf("cancelled job revived: %+v", j)
 	}
 }
+
+// A cancellation that arrives just after completion is not a server error;
+// the caller receives a typed conflict and the completed result stays intact.
+func TestCancelCompletedJobReturnsTypedConflict(t *testing.T) {
+	store := testUploadStorage(t)
+	id := uuid.NewString()
+	if _, err := store.CreateJob(id, "file.pcap", 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.BeginAnalysis(id); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CompleteJob(id, "done.json", "done.html"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CancelJob(id); !errors.Is(err, ErrAnalysisAlreadyFinished) {
+		t.Fatalf("completed cancellation = %v, want typed conflict", err)
+	}
+	job, err := store.GetJob(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != StatusCompleted {
+		t.Fatalf("completed job was altered by late cancellation: %+v", job)
+	}
+}

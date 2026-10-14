@@ -54,3 +54,26 @@ func TestStartAnalysisRejectsCancelledAndFailedJobs(t *testing.T) {
 
 // Compile-time check: the actual HTTP handler still matches Gin's handler contract.
 var _ gin.HandlerFunc = (*Handlers)(nil).StartAnalysis
+
+// HTTP cancellation of an already-completed job is a 409 Conflict, never 500.
+func TestCancelAnalysisCompletedJobReturnsConflict(t *testing.T) {
+	_, h, store := setupTestRouter(t)
+	id := uuid.NewString()
+	if _, err := store.CreateJob(id, "file.pcap", 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.BeginAnalysis(id); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CompleteJob(id, "done.json", "done.html"); err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	router.POST("/api/analyze/:id/cancel", h.CancelAnalysis)
+	req := httptest.NewRequest(http.MethodPost, fmt.Sprintf("/api/analyze/%s/cancel", id), nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("HTTP %d, want 409 Conflict: %s", recorder.Code, recorder.Body.String())
+	}
+}

@@ -306,16 +306,21 @@ func (h *Handlers) CancelAnalysis(c *gin.Context) {
 	}
 
 	if job.Status != storage.StatusAnalyzing {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "Analysis is not running",
-		})
+		status := http.StatusBadRequest
+		if job.Status == storage.StatusCompleted || job.Status == storage.StatusFailed ||
+			job.Status == storage.StatusCancelled {
+			status = http.StatusConflict
+		}
+		c.JSON(status, gin.H{"error": "Analysis is not running", "status": job.Status})
 		return
 	}
 
 	if err := h.store.CancelJob(id); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error": "Failed to cancel analysis",
-		})
+		if errors.Is(err, storage.ErrAnalysisAlreadyFinished) {
+			c.JSON(http.StatusConflict, gin.H{"error": "Analysis completed before cancellation"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to cancel analysis"})
 		return
 	}
 

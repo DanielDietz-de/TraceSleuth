@@ -79,5 +79,19 @@ for flags in (["-json"], ["-json", "-unknown-flag"], ["-unknown-flag", "-json"])
     assert failed.stdout == "", f"{flags} contaminated JSON stdout: {failed.stdout[:500]!r}"
     assert failed.stderr, f"{flags} did not report a diagnostic on stderr"
 
-print("CLI JSON smoke: single/compare produce one document; invalid arguments emit stderr only.")
+# A second PCAP that contains one valid record and then an incompletely
+# captured record must not yield a plausible comparison over its prefix.
+truncated = tmp / "incomplete.pcap"
+truncated.write_bytes(
+    pcap.read_bytes() + struct.pack("<IIII", 1728960001, 0, 54, 54) + b"partial"
+)
+bad_compare = subprocess.run(
+    [binary, "-compare", "-json", str(pcap), str(truncated)],
+    cwd=tmp, capture_output=True, text=True, timeout=40, check=False,
+)
+assert bad_compare.returncode != 0, "corrupt comparison capture incorrectly accepted"
+assert bad_compare.stdout == "", "corrupt comparison emitted misleading JSON"
+assert "invalid packet record" in bad_compare.stderr, bad_compare.stderr
+
+print("CLI JSON smoke: single/compare are valid; malformed comparisons and arguments are rejected.")
 PY

@@ -2,7 +2,9 @@ package analyzer
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
+	"io"
 	"net"
 	"strings"
 	"time"
@@ -291,8 +293,11 @@ func (c *Comparator) streamFile(filePath string, onPacket func(*packetMeta)) (in
 
 	for {
 		data, ci, err := reader.ReadPacketData()
+		if errors.Is(err, io.EOF) {
+			break
+		}
 		if err != nil {
-			break // EOF
+			return index, fmt.Errorf("invalid packet record at index %d in %s: %w", index, filePath, err)
 		}
 
 		pkt := gopacket.NewPacket(data, reader.LinkType(), gopacket.Lazy)

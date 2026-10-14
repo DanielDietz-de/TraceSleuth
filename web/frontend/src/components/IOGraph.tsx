@@ -9,6 +9,8 @@ import type { Discrepancy } from '../types';
 
 // ─── Types ────────────────────────────────────────────────────────
 
+const GRAPH_PADDING = { top: 20, right: 60, bottom: 40, left: 70 } as const;
+
 interface IOGraphProps {
   discrepancies: Discrepancy[];
   className?: string;
@@ -121,20 +123,19 @@ export function IOGraph({ discrepancies, className = '' }: IOGraphProps) {
   // SVG dimensions
   const width = 800;
   const height = 300;
-  const padding = { top: 20, right: 60, bottom: 40, left: 70 };
-  const graphWidth = width - padding.left - padding.right;
-  const graphHeight = height - padding.top - padding.bottom;
+  const graphWidth = width - GRAPH_PADDING.left - GRAPH_PADDING.right;
+  const graphHeight = height - GRAPH_PADDING.top - GRAPH_PADDING.bottom;
 
   // Scale functions
   const xScale = useCallback((time: number) => {
-    if (dataPoints.length <= 1) return padding.left;
+    if (dataPoints.length <= 1) return GRAPH_PADDING.left;
     const maxTime = dataPoints[dataPoints.length - 1]?.time || 1;
-    return padding.left + (time / maxTime) * graphWidth;
+    return GRAPH_PADDING.left + (time / maxTime) * graphWidth;
   }, [dataPoints, graphWidth]);
 
   const yScale = useCallback((value: number) => {
-    if (maxValue === 0) return height - padding.bottom;
-    return height - padding.bottom - (value / maxValue) * graphHeight;
+    if (maxValue === 0) return height - GRAPH_PADDING.bottom;
+    return height - GRAPH_PADDING.bottom - (value / maxValue) * graphHeight;
   }, [maxValue, graphHeight, height]);
 
   // Generate path
@@ -155,7 +156,7 @@ export function IOGraph({ discrepancies, className = '' }: IOGraphProps) {
     if (dataPoints.length === 0) return '';
     
     const getValue = (p: DataPoint) => metric === 'bytes' ? p.bytes : p.packets;
-    const baseline = height - padding.bottom;
+    const baseline = height - GRAPH_PADDING.bottom;
     
     let path = `M ${xScale(dataPoints[0].time)} ${baseline}`;
     dataPoints.forEach(point => {
@@ -270,9 +271,9 @@ export function IOGraph({ discrepancies, className = '' }: IOGraphProps) {
             {yTicks.map((tick, i) => (
               <line
                 key={i}
-                x1={padding.left}
+                x1={GRAPH_PADDING.left}
                 y1={yScale(tick)}
-                x2={width - padding.right}
+                x2={width - GRAPH_PADDING.right}
                 y2={yScale(tick)}
                 stroke="#334155"
                 strokeWidth="1"
@@ -318,17 +319,17 @@ export function IOGraph({ discrepancies, className = '' }: IOGraphProps) {
 
             {/* Y-axis */}
             <line
-              x1={padding.left}
-              y1={padding.top}
-              x2={padding.left}
-              y2={height - padding.bottom}
+              x1={GRAPH_PADDING.left}
+              y1={GRAPH_PADDING.top}
+              x2={GRAPH_PADDING.left}
+              y2={height - GRAPH_PADDING.bottom}
               stroke="#475569"
               strokeWidth="1"
             />
             {yTicks.map((tick, i) => (
               <text
                 key={i}
-                x={padding.left - 8}
+                x={GRAPH_PADDING.left - 8}
                 y={yScale(tick)}
                 textAnchor="end"
                 dominantBaseline="middle"
@@ -340,10 +341,10 @@ export function IOGraph({ discrepancies, className = '' }: IOGraphProps) {
 
             {/* X-axis */}
             <line
-              x1={padding.left}
-              y1={height - padding.bottom}
-              x2={width - padding.right}
-              y2={height - padding.bottom}
+              x1={GRAPH_PADDING.left}
+              y1={height - GRAPH_PADDING.bottom}
+              x2={width - GRAPH_PADDING.right}
+              y2={height - GRAPH_PADDING.bottom}
               stroke="#475569"
               strokeWidth="1"
             />
@@ -351,7 +352,7 @@ export function IOGraph({ discrepancies, className = '' }: IOGraphProps) {
               <text
                 key={i}
                 x={xScale(point.time)}
-                y={height - padding.bottom + 16}
+                y={height - GRAPH_PADDING.bottom + 16}
                 textAnchor="middle"
                 className="text-[10px] fill-slate-500"
               >
@@ -361,10 +362,10 @@ export function IOGraph({ discrepancies, className = '' }: IOGraphProps) {
 
             {/* Axis labels */}
             <text
-              x={padding.left - 50}
+              x={GRAPH_PADDING.left - 50}
               y={height / 2}
               textAnchor="middle"
-              transform={`rotate(-90, ${padding.left - 50}, ${height / 2})`}
+              transform={`rotate(-90, ${GRAPH_PADDING.left - 50}, ${height / 2})`}
               className="text-xs fill-slate-400"
             >
               {metric === 'bytes' ? 'Bytes/sec' : 'Packets/sec'}

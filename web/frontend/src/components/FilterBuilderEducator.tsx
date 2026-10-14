@@ -386,7 +386,7 @@ const FilterScratchpad: React.FC<{ discrepancies: Discrepancy[] }> = ({ discrepa
     setShowSuggestions(false);
     setVerified(null);
     inputRef.current?.focus();
-  }, [filterText]);
+  }, [filterText, setFilterText]);
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(filterText);

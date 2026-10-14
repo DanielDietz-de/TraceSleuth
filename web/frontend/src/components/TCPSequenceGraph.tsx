@@ -117,6 +117,26 @@ export function TCPSequenceGraph({
     });
   }, [points, showForward, showReverse, showRetransmitOnly]);
 
+  // ─── Stats (shown in header) ────────────────────────────────────
+  const stats = useMemo(() => {
+    let retx = 0;
+    let drops = 0;
+    let syn = 0;
+    let rst = 0;
+    let fwd = 0;
+    let rev = 0;
+    let zeroWin = 0;
+    for (const p of points) {
+      if (p.is_retransmission) retx++;
+      if (p.is_dropped) drops++;
+      if (p.is_syn) syn++;
+      if (p.is_rst) rst++;
+      if (p.direction === 'forward') fwd++; else rev++;
+      if (p.is_zero_window || (p.window_size === 0 && !p.is_rst && !p.is_syn)) zeroWin++;
+    }
+    return { retx, drops, syn, rst, fwd, rev, zeroWin, total: points.length };
+  }, [points]);
+
   // ─── Empty-state ────────────────────────────────────────────────
   if (points.length === 0) {
     return (
@@ -194,26 +214,6 @@ export function TCPSequenceGraph({
     const yBot = MARGIN.top + plotH;
     return yBot - norm * (yBot - yTop);
   }
-
-  // ─── Stats (shown in header) ────────────────────────────────────
-  const stats = useMemo(() => {
-    let retx = 0;
-    let drops = 0;
-    let syn = 0;
-    let rst = 0;
-    let fwd = 0;
-    let rev = 0;
-    let zeroWin = 0;
-    for (const p of points) {
-      if (p.is_retransmission) retx++;
-      if (p.is_dropped) drops++;
-      if (p.is_syn) syn++;
-      if (p.is_rst) rst++;
-      if (p.direction === 'forward') fwd++; else rev++;
-      if (p.is_zero_window || (p.window_size === 0 && !p.is_rst && !p.is_syn)) zeroWin++;
-    }
-    return { retx, drops, syn, rst, fwd, rev, zeroWin, total: points.length };
-  }, [points]);
 
   // ─── Axis ticks ─────────────────────────────────────────────────
   const xTicks = makeTicks(timeMin, timeMax, 6);

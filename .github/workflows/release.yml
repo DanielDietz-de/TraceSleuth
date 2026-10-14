@@ -65,11 +65,16 @@ jobs:
           npm run lint
           npm run test
 
-      - name: Stage embedded frontend
+      - name: Stage embedded frontend and GeoIP database
+        shell: bash
         run: |
+          set -euo pipefail
           rm -rf cmd/sdwan-triage/dist
-          mkdir -p cmd/sdwan-triage/dist
+          mkdir -p cmd/sdwan-triage/dist cmd/sdwan-triage/data
           cp -R web/frontend/dist/. cmd/sdwan-triage/dist/
+          test -s data/GeoLite2-City.mmdb
+          cp data/GeoLite2-City.mmdb cmd/sdwan-triage/data/GeoLite2-City.mmdb
+          test -s cmd/sdwan-triage/data/GeoLite2-City.mmdb
 
       - name: Set up Go
         uses: actions/setup-go@v6

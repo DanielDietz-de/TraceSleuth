@@ -103,7 +103,7 @@ const ComparisonView: React.FC<ComparisonViewProps> = ({ onClose }) => {
     } finally {
       setLoading(false);
     }
-  }, [fileA, fileB]);
+  }, [fileA, fileB, keyLogFile]);
 
   const toggleFlow = (idx: number) => {
     setExpandedFlows(prev => {

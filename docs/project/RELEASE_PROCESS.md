@@ -19,6 +19,8 @@ A release candidate must satisfy all applicable gates:
 - repository-hygiene checks pass;
 - secret scanning passes;
 - generated assets required by the build are reproducible and current;
+- the release workflow stages both the built frontend and the GeoIP database
+  before Go validation and cross-platform builds;
 - release artifacts build for supported targets;
 - checksums are generated;
 - SBOM/provenance requirements for the release phase are met;
@@ -170,4 +172,4 @@ When a release is materially broken:
 
 ## Current release status
 
-TraceSleuth `0.1.0` is a bootstrap milestone, not a production-ready release. It establishes provenance, audit, architecture contracts, roadmap and repository foundations while advanced detector and production-hardening work remains explicitly deferred.
+TraceSleuth `0.1.1` is a hardened bootstrap milestone, not a production-ready release. It establishes provenance, audit, architecture contracts, roadmap and repository foundations while advanced detector and production-hardening work remains explicitly deferred.

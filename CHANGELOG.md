@@ -50,6 +50,15 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
 - Add focused Go regression tests for upload limits, traversal prevention,
   storage containment, WebSocket origin/token handling and key-log lifecycle.
 
+### Release validation
+
+- Remove inherited frontend ESLint violations, including conditional React
+  hooks and stale fetch callbacks, so the full frontend lint gate passes.
+- Upgrade pull-request CI from changed-file-only lint validation to a
+  repository-wide blocking frontend lint gate, preventing debt regressions.
+- Stage the embedded GeoIP database in release CI before Go tests and all
+  cross-platform builds; previously the release workflow lacked this input.
+
 ### Compatibility
 
 - The backend and frontend must be upgraded together: pre-0.1.1 browsers

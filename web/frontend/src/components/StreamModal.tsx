@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { X, Copy, Filter, ChevronDown, ChevronUp } from 'lucide-react';
 import { StreamResponse, StreamSegmentView } from '../types';
 import { getAuthToken } from '../api/client';
@@ -26,13 +26,8 @@ const StreamModal: React.FC<StreamModalProps> = ({
   const [showHex, setShowHex] = useState<Record<number, boolean>>({});
   const [copiedFilter, setCopiedFilter] = useState(false);
 
-  useEffect(() => {
-    if (isOpen && jobId && streamId) {
-      fetchStream();
-    }
-  }, [isOpen, jobId, streamId]);
 
-  const fetchStream = async () => {
+  const fetchStream = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -50,7 +45,14 @@ const StreamModal: React.FC<StreamModalProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [jobId, streamId]);
+
+  useEffect(() => {
+    if (isOpen && jobId && streamId) {
+      fetchStream();
+    }
+  }, [isOpen, jobId, streamId, fetchStream]);
+
 
   // Merge client and server segments into a single timeline sorted by timestamp
   const interleavedSegments = useMemo(() => {

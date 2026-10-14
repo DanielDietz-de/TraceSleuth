@@ -317,7 +317,16 @@ func (h *Handlers) CancelAnalysis(c *gin.Context) {
 
 	if err := h.store.CancelJob(id); err != nil {
 		if errors.Is(err, storage.ErrAnalysisAlreadyFinished) {
-			c.JSON(http.StatusConflict, gin.H{"error": "Analysis completed before cancellation"})
+			// CompleteJob and FailJob can BOTH win between the initial read and
+			// the locked CancelJob transition. Report the actual terminal state.
+			terminal := "finished"
+			if current, lookupErr := h.store.GetJob(id); lookupErr == nil {
+				terminal = string(current.Status)
+			}
+			c.JSON(http.StatusConflict, gin.H{
+				"error":  "Analysis finished before cancellation",
+				"status": terminal,
+			})
 			return
 		}
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to cancel analysis"})

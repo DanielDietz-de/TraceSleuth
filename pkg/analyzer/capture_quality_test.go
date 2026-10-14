@@ -456,3 +456,68 @@ func TestClassicPCAPTimestampResolutionFromMagic(t *testing.T) {
 		})
 	}
 }
+
+// PCAPNG can aggregate many interfaces. One deep member must not make
+// STP/LACP appear observable across another interface with a short snaplen.
+func TestInspectCaptureMultipleInterfacesConservativelyGateCapabilities(t *testing.T) {
+	var buffer bytes.Buffer
+	writer, err := pcapgo.NewNgWriter(&buffer, layers.LinkTypeEthernet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deepIndex, err := writer.AddInterface(pcapgo.NgInterface{
+		Name: "full-capture", LinkType: layers.LinkTypeEthernet, SnapLength: 124,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		index  int
+		length int
+	}{
+		{0, 14},
+		{deepIndex, 124},
+	} {
+		packet := make([]byte, tc.length)
+		if err := writer.WritePacket(gopacket.CaptureInfo{
+			Timestamp:      time.Unix(123, int64(tc.index)*1e6),
+			CaptureLength:  tc.length,
+			Length:         tc.length,
+			InterfaceIndex: tc.index,
+		}, packet); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "mixed-depth.pcapng")
+	if err := os.WriteFile(path, buffer.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	quality, err := InspectCapture(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if quality.PacketCount != 2 || quality.Status != "degraded" {
+		t.Fatalf("invalid quality summary for shallow capture: %+v", quality)
+	}
+	if !reflect.DeepEqual(quality.Capabilities, []string{"ethernet"}) {
+		t.Fatalf("STP/LACP/VLAN granted using the other deeper interface: %v", quality.Capabilities)
+	}
+	foundShallow := false
+	for _, issue := range quality.Limitations {
+		if issue.Code == "insufficient_layer2_capture_depth" &&
+			strings.Contains(issue.Description, "section 0 interface 0") {
+			foundShallow = true
+		}
+	}
+	if !foundShallow {
+		t.Fatalf("missing per-interface limitation: %+v", quality.Limitations)
+	}
+	if len(quality.Interfaces) != 2 ||
+		quality.Interfaces[0].PacketCount != 1 ||
+		quality.Interfaces[1].PacketCount != 1 {
+		t.Fatalf("incorrect packet counts per interface: %+v", quality.Interfaces)
+	}
+}

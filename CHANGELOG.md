@@ -87,6 +87,14 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
   root VERSION and validate that contract rather than leaving a stale
   0.1.1 claim in the 0.2.0 release documentation.
 
+- Reject header-only PCAP and PCAPNG comparisons rather than reporting
+  misleading zero-packet path integrity; include both-side CLI and Go tests.
+- Attribute capture-reported packet loss to the exact PCAPNG section,
+  interface index, and interface name so engineers can locate the
+  unreliable SPAN/TAP source.
+- Document the accepted -no-external-lookup flag in built-in help and
+  remove legacy nonexistent analysis subcommand examples.
+
 ### Remaining limitations
 
 - This is an **initial Phase 2 checkpoint**, not completed capture trust:

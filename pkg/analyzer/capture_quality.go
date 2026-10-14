@@ -153,7 +153,7 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 				if drops > 0 {
 					q.Limitations = append(q.Limitations, models.CaptureQualityIssue{
 						Code: "capture_reported_drops", Severity: "warning", Count: drops,
-						Description: "The capture interface reported packet drops; absence of packets is not conclusive evidence of network loss.",
+						Description: fmt.Sprintf("Capture section %d interface %d (%q) reported %d packet drops; absence of packets is not conclusive evidence of network loss.", section, idx, iface.Name, drops),
 					})
 					q.Status = "degraded"
 				}

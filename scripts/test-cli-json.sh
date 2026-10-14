@@ -93,6 +93,19 @@ assert bad_compare.returncode != 0, "corrupt comparison capture incorrectly acce
 assert bad_compare.stdout == "", "corrupt comparison emitted misleading JSON"
 assert "invalid packet record" in bad_compare.stderr, bad_compare.stderr
 
+# Header-only classic PCAP is structurally valid but has zero observations.
+# Neither side of a comparison may silently be an empty capture.
+header_only = tmp / "header-only.pcap"
+header_only.write_bytes(header)
+for before, after in ((pcap, header_only), (header_only, pcap)):
+    rejected = subprocess.run(
+        [binary, "-compare", "-json", str(before), str(after)],
+        cwd=tmp, capture_output=True, text=True, timeout=40, check=False,
+    )
+    assert rejected.returncode != 0, "header-only comparison unexpectedly succeeded"
+    assert rejected.stdout == "", rejected.stdout
+    assert "no packet records" in rejected.stderr, rejected.stderr
+
 # Only terminal text and JSON are currently supported for comparison mode.
 # Do not pretend a requested HTML/CSV/PDF export succeeded while ignoring it.
 for export in (["-html", "report.html"], ["-csv", "report.csv"], ["-pdf", "report.pdf"], ["-simple"]):
@@ -139,6 +152,8 @@ help_text = subprocess.run([binary, "-help"], cwd=tmp, capture_output=True,
 assert help_text.returncode == 0
 assert "-html report.html -json -csv" not in help_text.stdout
 assert "tracesleuth -json capture.pcap" in help_text.stdout
+assert "-no-external-lookup" in help_text.stdout
+assert "tracesleuth analyze " not in help_text.stdout
 
-print("CLI smoke: JSON remains parseable; rejected comparison exports/filters and help examples are consistent.")
+print("CLI smoke: JSON/compare reject corrupt or empty captures, invalid flags, and misleading help.")
 PY

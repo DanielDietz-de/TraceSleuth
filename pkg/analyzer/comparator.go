@@ -307,6 +307,9 @@ func (c *Comparator) streamFile(filePath string, onPacket func(*packetMeta)) (in
 	for {
 		data, ci, err := reader.ReadPacketData()
 		if errors.Is(err, io.EOF) {
+			if index == 0 {
+				return 0, fmt.Errorf("comparison capture contains no packet records")
+			}
 			break
 		}
 		if err != nil {

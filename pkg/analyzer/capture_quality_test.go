@@ -521,3 +521,61 @@ func TestInspectCaptureMultipleInterfacesConservativelyGateCapabilities(t *testi
 		t.Fatalf("incorrect packet counts per interface: %+v", quality.Interfaces)
 	}
 }
+
+// With multiple capture points, reported packet drops must identify the
+// source interface; otherwise UI users cannot locate the unreliable TAP.
+func TestInspectCaptureIdentifiesInterfaceThatReportedDrops(t *testing.T) {
+	var buffer bytes.Buffer
+	writer, err := pcapgo.NewNgWriter(&buffer, layers.LinkTypeEthernet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	affected, err := writer.AddInterface(pcapgo.NgInterface{
+		Name: "tap-secondary", LinkType: layers.LinkTypeEthernet,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, idx := range []int{0, affected} {
+		if err := writer.WritePacket(gopacket.CaptureInfo{
+			Timestamp:     time.Unix(1_000, 0),
+			CaptureLength: 60, Length: 60, InterfaceIndex: idx,
+		}, make([]byte, 60)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.WriteInterfaceStats(affected, pcapgo.NgInterfaceStatistics{
+		LastUpdate: time.Unix(1_001, 0), PacketsDropped: 13,
+		PacketsReceived: pcapgo.NgNoValue64,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "stats.pcapng")
+	if err := os.WriteFile(path, buffer.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	quality, err := InspectCapture(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, issue := range quality.Limitations {
+		if issue.Code == "capture_reported_drops" {
+			if strings.Contains(issue.Description, "section 0 interface 1") &&
+				strings.Contains(issue.Description, "tap-secondary") && issue.Count == 13 {
+				found = true
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("did not attribute reported drops to capture interface: %+v", quality.Limitations)
+	}
+	if len(quality.Interfaces) != 2 || quality.Interfaces[0].ReportedDrops != nil ||
+		quality.Interfaces[1].ReportedDrops == nil ||
+		*quality.Interfaces[1].ReportedDrops != 13 {
+		t.Fatalf("incorrect reported drop pointers: %+v", quality.Interfaces)
+	}
+}

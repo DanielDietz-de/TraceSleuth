@@ -65,13 +65,14 @@ OPTIONS:
     -app-identify          Enable deep application identification using heuristics
     -verbose               Enable verbose/debug output for troubleshooting
 
-  Network Features (require internet access):
-    -trace-path            Perform traceroute to discovered destinations (top 5 by anomalies)
-    -bgp-check             Check BGP routing data for potential hijack indicators
+  Network Features:
+    -trace-path            Traceroute to discovered destinations (requires internet)
+    -bgp-check             Check BGP routing data (requires internet)
+    -no-external-lookup    Disable external network lookups (also accepted in -compare)
 
   Multi-File Analysis:
     -compare               Compare two PCAP files (console or -json output only;
-                           CSV/HTML/PDF export options are not supported)
+                           CSV/HTML/PDF and analysis-only filters are not supported)
 
   Web Application Mode:
     -web                   Start the interactive web application instead of CLI mode
@@ -215,19 +216,19 @@ EXAMPLES:
 
   LAN Protocol Analysis (VRRP, CDP, LLDP, HSRP, STP):
     # Re-analyze capture with VRRP detection
-    tracesleuth analyze vrrp-capture.pcap
+    tracesleuth -json vrrp-capture.pcap
 
     # Check for VRRP flapping
-    tracesleuth analyze vrrp-capture.pcap | jq '.lan_protocols.vrrp_sessions[] | select(.is_flapping == true)'
+    tracesleuth -json vrrp-capture.pcap | jq '.lan_protocols.vrrp_sessions[] | select(.is_flapping == true)'
 
     # View VRRP timeline events
-    tracesleuth analyze vrrp-capture.pcap | jq '.timeline[] | select(.protocol == "VRRP")'
+    tracesleuth -json vrrp-capture.pcap | jq '.timeline[] | select(.protocol == "VRRP")'
 
     # Discover CDP devices
-    tracesleuth -html report.html capture.pcap | jq '.lan_protocols.cdp_devices[]'
+    tracesleuth -json capture.pcap | jq '.lan_protocols.cdp_devices[]'
 
     # Check HSRP failover events
-    tracesleuth analyze capture.pcap | jq '.timeline[] | select(.protocol == "HSRP")'
+    tracesleuth -json capture.pcap | jq '.timeline[] | select(.protocol == "HSRP")'
 
   Web Application Mode:
     # Start the interactive web UI (opens browser automatically)

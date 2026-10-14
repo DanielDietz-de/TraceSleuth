@@ -8,6 +8,7 @@ import (
 // TriageReport contains all detected network anomalies and analysis results
 // The Mu field protects concurrent slice/map appends from parallel detectors.
 type TriageReport struct {
+	CaptureQuality              *CaptureQuality              `json:"capture_quality,omitempty"`
 	Mu                          sync.Mutex                   `json:"-"` // Protects concurrent writes from parallel detectors
 	DNSAnomalies                []DNSAnomaly                 `json:"dns_anomalies"`
 	TCPRetransmissions          []TCPFlow                    `json:"tcp_retransmissions"`

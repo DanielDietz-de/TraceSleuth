@@ -389,7 +389,13 @@ For more information and documentation:
 		fmt.Fprintf(os.Stderr, "[DEBUG] Opening PCAP file: %s (size: %d bytes)\n", absPath, fileInfo.Size())
 	}
 
-	// Open capture file (auto-detects pcap vs pcapng)
+	// Capture integrity and observability must be established before
+	// attempting network fault diagnosis.
+	quality, err := analyzer.InspectCapture(absPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Capture quality preflight failed: %v\n", err)
+		os.Exit(1)
+	}
 	capHandle, err := analyzer.OpenCapture(absPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: Failed to read capture file '%s'\n", filepath.Base(absPath))
@@ -408,6 +414,7 @@ For more information and documentation:
 
 	// Initialize report and state
 	report := &models.TriageReport{
+		CaptureQuality: quality,
 		ApplicationBreakdown: make(map[string]models.AppCategory),
 	}
 	state := models.NewAnalysisState()

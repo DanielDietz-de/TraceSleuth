@@ -9,12 +9,35 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
 ### Planned
 
 - Complete remaining product-identity migration for inherited runtime source paths, frontend strings, API metadata, and configuration/storage names.
-- Capture-quality preflight and capture-duplication analysis.
+- Capture-duplication/SPAN/packet-broker differentiation and full capture capability propagation.
 - Normalized observation, finding, and evidence architecture implementation.
 - Layer-2 duplicate/storm/loop analysis.
 - STP, LACP, FHRP, and MLAG symptom analysis.
 - Generalized multi-capture correlation.
 - Retention, storage quotas, analysis resource limits, and comprehensive self-hosting hardening.
+
+## [0.2.0] - 2026-10-14
+
+### Added
+
+- Capture-integrity preflight executes before inherited fault detectors in
+  both the CLI and the authenticated web analysis path.
+- Report capture SHA-256, PCAP/PCAPNG format, per-interface metadata where
+  available, link types, packet totals and duration, truncation, observed
+  timestamp anomalies, and capture-reported packet drops.
+- Export a structured `capture_quality` result in the existing JSON report;
+  display capture observations and limitations in the React results UI.
+- Reject malformed/truncated/empty capture files during preflight; bound the
+  parser's recovery from repeated record-read errors.
+- Add synthetic PCAP/PCAPNG positive/negative tests, malformed-input tests,
+  result integration assertions and UI regression tests.
+
+### Remaining limitations
+
+- This is an **initial Phase 2 checkpoint**, not completed capture trust:
+  capture duplication/SPAN differentiation, downstream confidence penalties,
+  per-packet evidence references, and full capability-aware detector logic
+  remain planned. The product is still pre-production.
 
 ## [0.1.1] - 2026-10-14
 

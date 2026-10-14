@@ -17,6 +17,7 @@ import {
   X,
 } from 'lucide-react';
 import type { AnalysisResults } from '../../types';
+import { CaptureQualityCard } from './CaptureQualityCard';
 import type { ParsedFilter } from '../../hooks';
 import { downloadFile } from '../../api/client';
 import { formatDate } from '../../utils';
@@ -161,6 +162,8 @@ export function SummarySection({
           </button>
         </div>
       </div>
+
+      <CaptureQualityCard quality={results.capture_quality} />
 
       {/* Help Modal */}
       {helpOpen && (

@@ -20,7 +20,7 @@ import (
 
 // Build-time variables — stamped via -ldflags "-X main.version=... -X main.buildCommit=... -X main.buildDate=..."
 var (
-	version     = "6.1.0.0"
+	version     = "dev" // stamped from root VERSION by the supported build pipeline
 	buildCommit = "unknown"
 	buildDate   = "unknown"
 )
@@ -31,7 +31,7 @@ var verbose *bool
 func main() {
 	// Define custom usage function
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stdout, `SD-WAN Network Triage v%s
+		fmt.Fprintf(os.Stdout, `TraceSleuth v%s
 Comprehensive PCAP analysis tool for SD-WAN networks with advanced security detection,
 performance monitoring, and interactive D3.js visualizations.
 
@@ -389,7 +389,12 @@ For more information and documentation:
 		fmt.Fprintf(os.Stderr, "[DEBUG] Opening PCAP file: %s (size: %d bytes)\n", absPath, fileInfo.Size())
 	}
 
-	// Open capture file (auto-detects pcap vs pcapng)
+	// Capture trust/observability must be inspected before fault diagnosis.
+	quality, err := analyzer.InspectCapture(absPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Capture quality preflight failed: %v\n", err)
+		os.Exit(1)
+	}
 	capHandle, err := analyzer.OpenCapture(absPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: Failed to read capture file '%s'\n", filepath.Base(absPath))
@@ -408,6 +413,7 @@ For more information and documentation:
 
 	// Initialize report and state
 	report := &models.TriageReport{
+		CaptureQuality:       quality,
 		ApplicationBreakdown: make(map[string]models.AppCategory),
 	}
 	state := models.NewAnalysisState()
@@ -435,8 +441,11 @@ For more information and documentation:
 		processor.SetHandshakeTimeout(time.Duration(*handshakeTimeout) * time.Second)
 	}
 
-	color.Cyan("SD-WAN Network Triage v%s", version)
-	color.Cyan("Analyzing: %s\n", filepath.Base(absPath))
+	// Machine-readable JSON must be the only content on stdout.
+	if !*jsonOutput {
+		color.Cyan("TraceSleuth v%s", version)
+		color.Cyan("Analyzing: %s\n", filepath.Base(absPath))
+	}
 
 	if err := processor.Process(reader, state, report, filter); err != nil {
 		fmt.Fprintf(os.Stderr, "Error processing PCAP: %v\n", err)

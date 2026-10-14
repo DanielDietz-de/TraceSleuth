@@ -42,8 +42,12 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 	}
 	log.Printf("[ANALYSIS] Starting analysis for job: %s, file: %s", job.ID, job.FileName)
 
-	// Update progress: Starting
-	store.UpdateProgress(job.ID, 5, "Opening PCAP file...", 60)
+	// Capture validity/observability is established before fault detectors.
+	store.UpdateProgress(job.ID, 5, "Validating capture integrity...", 60)
+	quality, err := analyzer.InspectCapture(job.FilePath)
+	if err != nil {
+		return "", "", fmt.Errorf("capture quality preflight failed: %w", err)
+	}
 
 	// Open capture file (auto-detects pcap vs pcapng)
 	capHandle, err := analyzer.OpenCapture(job.FilePath)
@@ -64,7 +68,7 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 
 	// Initialize analysis state and report
 	state := models.NewAnalysisState()
-	report := &models.TriageReport{}
+	report := &models.TriageReport{CaptureQuality: quality}
 
 	// Use the existing Process method which handles everything
 	startTime := time.Now()
@@ -125,7 +129,7 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 	}
 
 	// Count packets from the report data
-	packetCount := countPacketsFromReport(report)
+	packetCount := int(quality.PacketCount)
 	log.Printf("[ANALYSIS] Total packets analyzed: %d", packetCount)
 
 	// Wrap report with metadata for frontend

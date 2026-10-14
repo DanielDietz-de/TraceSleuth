@@ -11,11 +11,13 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gocisse/sdwan-triage/pkg/web/storage"
+	"github.com/google/uuid"
 )
 
 // ─── Minimal PCAP Fixture ──────────────────────────────────────────
@@ -280,6 +282,37 @@ func TestFullPipeline_Upload_Analyze_Results(t *testing.T) {
 		if _, ok := result[key]; !ok {
 			t.Errorf("results JSON missing key %q", key)
 		}
+	}
+	quality, ok := result["capture_quality"].(map[string]interface{})
+	if !ok {
+		t.Fatal("results JSON has no capture quality preflight data")
+	}
+	if quality["status"] != "good" || quality["format"] != "pcap" {
+		t.Fatalf("unexpected capture quality: %+v", quality)
+	}
+	if digest, ok := quality["sha256"].(string); !ok || len(digest) != 64 {
+		t.Fatalf("missing SHA256 capture identity: %+v", quality["sha256"])
+	}
+	if packets, ok := quality["packet_count"].(float64); !ok || packets != 1 {
+		t.Fatalf("unexpected capture preflight packet count: %+v", quality["packet_count"])
+	}
+}
+
+// Fail malformed captures before any protocol-specific fault detector is run.
+func TestAnalyzePCAPRejectsTruncatedCaptureBeforeDetection(t *testing.T) {
+	_, _, store := setupTestRouter(t)
+	data := buildMinimalPCAP()
+	path := filepath.Join(t.TempDir(), "truncated.pcap")
+	if err := os.WriteFile(path, data[:len(data)-8], 0600); err != nil {
+		t.Fatal(err)
+	}
+	job, err := store.CreateJob(uuid.NewString(), "truncated.pcap", int64(len(data)-8), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = AnalyzePCAP(store, job)
+	if err == nil || !strings.Contains(err.Error(), "capture quality preflight failed") {
+		t.Fatalf("malformed capture was not rejected during preflight: %v", err)
 	}
 }
 

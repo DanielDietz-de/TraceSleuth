@@ -1,23 +1,43 @@
 name: Release
 
+# A version-tag push or an explicitly authorized main-branch release can
+# publish artifacts, but only after exact-SHA CI and Security pass.
 on:
   push:
+    branches:
+      - main
     tags:
       - 'v*.*.*'
   workflow_dispatch:
+    inputs:
+      publish_version:
+        description: 'Exact VERSION to publish (e.g. 0.2.0)'
+        required: true
+        type: string
 
 permissions:
   contents: write
+  actions: read
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
   NODE_VERSION: '24'
   BINARY_NAME: tracesleuth
 
+concurrency:
+  group: release-${{ github.sha }}
+  cancel-in-progress: false
+
 jobs:
   release:
     name: Build and release TraceSleuth
+    if: >-
+      github.ref_type == 'tag' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+       startsWith(github.event.head_commit.message, 'release: v'))
     runs-on: ubuntu-latest
+    timeout-minutes: 80
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -28,27 +48,88 @@ jobs:
       - name: Read and validate version
         id: version
         shell: bash
+        env:
+          RELEASE_MESSAGE: ${{ github.event.head_commit.message }}
+          RELEASE_INPUT_VERSION: ${{ inputs.publish_version }}
         run: |
           set -euo pipefail
           version="$(tr -d '\r\n' < VERSION)"
-          tag="${GITHUB_REF#refs/tags/}"
-
-          if [[ "$tag" == "$GITHUB_REF" ]]; then
-            echo 'Release workflow must run from a tag.' >&2
+          expected="v${version}"
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            tag="${GITHUB_REF#refs/tags/}"
+          elif [[ "$GITHUB_REF" == refs/heads/main && "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
+            tag="$expected"
+            if [[ "$RELEASE_INPUT_VERSION" != "$version" ]]; then
+              echo 'Manual release VERSION does not match the repository.' >&2
+              exit 1
+            fi
+          elif [[ "$GITHUB_REF" == refs/heads/main && "$GITHUB_EVENT_NAME" == push ]]; then
+            tag="$expected"
+            subject="${RELEASE_MESSAGE%%$'\n'*}"
+            if [[ "$subject" != "release: $expected" && "$subject" != "release: $expected "* ]]; then
+              echo 'A main-branch release requires release: vX.Y.Z in the commit subject.' >&2
+              exit 1
+            fi
+          else
+            echo 'Release must originate from a version tag or authorized main.' >&2
             exit 1
           fi
-
-          if [[ "$tag" != "v${version}" ]]; then
+          if [[ "$tag" != "$expected" ]]; then
             printf 'Tag/version mismatch: tag=%s VERSION=%s\n' "$tag" "$version" >&2
             exit 1
           fi
-
           bash scripts/check-version-contract.sh
-
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           echo "date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+
+      - name: Require fresh CI and Security on release commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 90); do
+            completed=0
+            for flow in ci.yml security.yml; do
+              url="repos/${GITHUB_REPOSITORY}/actions/workflows/${flow}/runs?head_sha=${GITHUB_SHA}&event=push&per_page=100"
+              state="$(gh api "$url" | jq -r --arg sha "$GITHUB_SHA" '
+                [.workflow_runs[] | select(.head_sha == $sha)] |
+                sort_by(.run_attempt) | last | (.conclusion // "pending")
+              ')"
+              printf '%s exact SHA=%s result=%s\n' "$flow" "$GITHUB_SHA" "$state"
+              case "$state" in
+                success) completed=$((completed + 1));;
+                pending) ;;
+                *) echo "Refusing release: $flow concluded $state" >&2; exit 1;;
+              esac
+            done
+            if [[ "$completed" == 2 ]]; then
+              echo 'Both exact-commit push workflows are successful.'
+              exit 0
+            fi
+            sleep 10
+          done
+          echo 'Timed out waiting for CI and Security on this exact commit.' >&2
+          exit 1
+
+      - name: Prevent duplicate version publication
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='${{ steps.version.outputs.tag }}'
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo 'Release already exists for this version; refusing overwrite.' >&2
+            exit 1
+          fi
+          if [[ "$GITHUB_REF" == refs/heads/main ]] &&
+             git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo 'Version tag already exists; use the tagged release path.' >&2
+            exit 1
+          fi
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -108,6 +189,9 @@ jobs:
           go build -trimpath -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-linux-amd64 ./cmd/sdwan-triage
           tar -czf build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-linux-amd64.tar.gz -C build ${{ env.BINARY_NAME }}-linux-amd64
 
+      - name: Verify Linux CLI machine-readable output
+        run: bash scripts/test-cli-json.sh build/${{ env.BINARY_NAME }}-linux-amd64
+
       - name: Build macOS amd64
         env:
           CGO_ENABLED: 0
@@ -134,13 +218,40 @@ jobs:
         run: |
           go build -trimpath -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-windows-amd64.exe ./cmd/sdwan-triage
           cd build
-          zip ${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-windows-amd64.zip ${{ env.BINARY_NAME }}-windows-amd64.exe
+          # zip is not available on every authorized build host. Python's
+          # standard library yields the same portable ZIP without extra apt.
+          python3 - <<'PYCODE'
+          from zipfile import ZipFile, ZIP_DEFLATED
+          binary = 'tracesleuth-windows-amd64.exe'
+          archive = 'tracesleuth-${{ steps.version.outputs.tag }}-windows-amd64.zip'
+          with ZipFile(archive, 'w', compression=ZIP_DEFLATED, compresslevel=6) as z:
+              z.write(binary)
+          PYCODE
 
       - name: Generate SHA-256 checksums
         working-directory: build
         run: |
           sha256sum *.tar.gz *.zip > checksums-${{ steps.version.outputs.tag }}.txt
           cat checksums-${{ steps.version.outputs.tag }}.txt
+
+      - name: Verify archive checksums and prepare prerelease notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd build && sha256sum -c 'checksums-${{ steps.version.outputs.tag }}.txt')
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          version = Path('VERSION').read_text().strip()
+          lines = Path('CHANGELOG.md').read_text().splitlines()
+          start = next(i for i, line in enumerate(lines) if line.startswith('## [' + version + ']'))
+          end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith('## [')), len(lines))
+          notes = '\n'.join(lines[start:end]).strip()
+          if not notes or 'Remaining limitations' not in notes:
+              raise SystemExit('Release notes must state remaining limitations')
+          Path('build/release-notes.md').write_text(
+              '**Pre-1.0 prerelease: not production-ready.**\n\n' + notes + '\n'
+          )
+          PYCODE
 
       - name: Create GitHub release
         env:
@@ -159,5 +270,6 @@ jobs:
             build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-windows-amd64.zip \
             build/checksums-${{ steps.version.outputs.tag }}.txt \
             --title 'TraceSleuth ${{ steps.version.outputs.tag }}' \
-            --generate-notes \
+            --notes-file build/release-notes.md \
+            --target "$GITHUB_SHA" \
             "${prerelease_args[@]}"

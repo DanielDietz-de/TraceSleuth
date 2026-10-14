@@ -159,6 +159,31 @@ git push origin "v${VERSION}"
 
 Signed tags are preferred where maintainer signing infrastructure is available. Never invent or embed maintainer credentials in automation.
 
+## Controlled automated prerelease publication
+
+In addition to a maintainer-created version tag, the Release workflow supports
+a guarded publish from the default branch. It accepts exactly one of:
+
+- a push of a matching `vX.Y.Z` tag;
+- a GitHub Actions manual dispatch on `main` supplying the exact `VERSION`;
+- a reviewed merge to `main` whose commit subject begins
+  `release: vX.Y.Z`, with X.Y.Z exactly matching `VERSION`.
+
+The release job does not publish until **both CI and Security have succeeded on
+the exact release commit SHA** (not the pull-request head or another branch).
+It then repeats frontend build/full lint/tests, Go vet/tests/race tests,
+builds the four supported binaries, exercises CLI JSON regression checks,
+verifies all archive SHA-256 checksums, and only then creates the release.
+For pre-1.0 versions the release is explicitly marked as a **prerelease** and
+its notes include the remaining limitations. Existing releases cannot be
+silently replaced.
+
+Signed maintainer tags are preferred. When publication is initiated on
+`main` without a signed tag, GitHub's release API creates a lightweight
+version tag at the exact validated release SHA, using the scoped
+GitHub Actions token. This is an explicitly documented pre-1.0 alternative,
+not a claim that the tag is GPG-signed.
+
 ## Rollback and withdrawn releases
 
 Do not silently move an existing public release tag.
@@ -172,4 +197,8 @@ When a release is materially broken:
 
 ## Current release status
 
-TraceSleuth `0.1.1` is a hardened bootstrap milestone, not a production-ready release. It establishes provenance, audit, architecture contracts, roadmap and repository foundations while advanced detector and production-hardening work remains explicitly deferred.
+The current version is declared by the repository-root `VERSION` file,
+with the corresponding scope and unfinished milestones recorded in
+`CHANGELOG.md` and `ROADMAP.md`. All pre-1.0 releases remain
+prereleases and must not be represented as production-ready or as having
+implemented detectors that remain planned.

@@ -1,0 +1,87 @@
+name: Bug report
+description: Report a reproducible TraceSleuth defect that is not primarily a detector false positive or false negative.
+title: "bug: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach private customer or production captures publicly. For vulnerabilities, follow SECURITY.md instead of filing a public issue.
+
+  - type: input
+    id: version
+    attributes:
+      label: TraceSleuth version or commit
+      description: Provide the exact version, tag, or Git commit SHA.
+      placeholder: 0.1.0 or abcdef123...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: interface
+    attributes:
+      label: Interface
+      options:
+        - CLI
+        - Web UI
+        - API
+        - Build or release
+        - Storage or retention
+        - Authentication
+        - Other
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, architecture, browser if relevant, container/native, Go/Node versions if building from source.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps
+      description: Provide minimal deterministic steps. Use a synthetic or redistributable capture where possible.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+    validations:
+      required: true
+
+  - type: textarea
+    id: capture-context
+    attributes:
+      label: Capture context
+      description: PCAP/PCAPNG, link type, snap length, capture point, SPAN/TAP/ERSPAN/packet broker, and any known capture limitations.
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Sanitized logs or errors
+      description: Remove passwords, tokens, private payloads, and other secrets.
+      render: text
+
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Data and security confirmation
+      options:
+        - label: I have not attached private customer/production captures or credentials publicly.
+          required: true
+        - label: This is not an undisclosed exploitable security vulnerability. If it is, I will follow SECURITY.md.
+          required: true

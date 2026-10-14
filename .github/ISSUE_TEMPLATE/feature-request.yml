@@ -1,0 +1,69 @@
+name: Feature request
+description: Propose a product, workflow, API, UI, deployment, or analysis capability.
+title: "feature: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem to solve
+      description: Describe the troubleshooting or operational problem, not only the desired implementation.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed capability
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence and observability
+      description: For analysis features, explain what packet/capture evidence would support the capability and what cannot be known from a PCAP alone.
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternative explanations or approaches
+      description: Include false-positive risks, limitations, and competing designs where relevant.
+
+  - type: dropdown
+    id: scope
+    attributes:
+      label: Primary scope
+      options:
+        - Capture quality
+        - Evidence and findings
+        - Layer 2
+        - STP or redundancy
+        - LACP or MLAG symptoms
+        - Routing or Layer 3
+        - TCP or transport
+        - DNS/DHCP/NTP/services
+        - SIP/RTP/voice
+        - Multi-capture correlation
+        - Topology
+        - Web UI
+        - CLI
+        - API
+        - Reporting/export
+        - Security/hardening
+        - Deployment/operations
+        - Development/testing
+        - Other
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: principles
+    attributes:
+      label: Product principles
+      options:
+        - label: The proposal does not require an opaque AI model to be the primary authority for a network diagnosis.
+          required: true
+        - label: I understand that roadmap entries are not implementation claims and acceptance criteria/tests are required.
+          required: true

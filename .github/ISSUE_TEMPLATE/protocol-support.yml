@@ -1,0 +1,57 @@
+name: Protocol support request
+description: Request parsing, observation, detector, or enrichment support for a network protocol.
+title: "protocol: "
+labels:
+  - protocol-support
+body:
+  - type: input
+    id: protocol
+    attributes:
+      label: Protocol or encapsulation
+      placeholder: LACP, MSTP, IS-IS, Geneve, GLBP, vendor TLV...
+    validations:
+      required: true
+
+  - type: textarea
+    id: use-case
+    attributes:
+      label: Troubleshooting use case
+      description: What network problem should TraceSleuth help diagnose?
+    validations:
+      required: true
+
+  - type: textarea
+    id: observable-fields
+    attributes:
+      label: Observable packet evidence
+      description: Which wire fields, state transitions, sequence values, TLVs, timers, or capture-point relationships support the requested behavior?
+    validations:
+      required: true
+
+  - type: textarea
+    id: references
+    attributes:
+      label: Authoritative references
+      description: Standards, RFCs, IEEE specifications, public vendor documentation, Wireshark dissector/display-filter documentation, or redistributable fixtures.
+
+  - type: textarea
+    id: limitations
+    attributes:
+      label: Limitations and alternative explanations
+      description: What cannot be concluded from a PCAP alone? Which healthy conditions could resemble the requested fault?
+
+  - type: textarea
+    id: fixtures
+    attributes:
+      label: Available fixtures
+      description: Describe synthetic or redistributable positive and negative captures. Do not attach private production captures publicly.
+
+  - type: checkboxes
+    id: accuracy
+    attributes:
+      label: Accuracy confirmation
+      options:
+        - label: I am not asking TraceSleuth to invent undocumented protocol fields or vendor behavior.
+          required: true
+        - label: I understand that a parser, observation, detector, and vendor inference may be separate implementation layers.
+          required: true

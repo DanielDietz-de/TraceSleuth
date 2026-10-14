@@ -23,8 +23,8 @@ type QoSAggregation struct {
 	Alerts []QoSAlert `json:"alerts"`
 
 	// Totals
-	TotalPackets uint64  `json:"total_packets"`
-	TotalBytes   uint64  `json:"total_bytes"`
+	TotalPackets  uint64 `json:"total_packets"`
+	TotalBytes    uint64 `json:"total_bytes"`
 	UniqueClasses int    `json:"unique_classes"`
 
 	// LAN-vs-WAN comparison (nil when only a single capture is loaded)
@@ -33,13 +33,13 @@ type QoSAggregation struct {
 
 // QoSClassSummary is one row in the DSCP distribution pie/table.
 type QoSClassSummary struct {
-	ClassName   string  `json:"class_name"`   // e.g. "EF", "AF41", "BE"
+	ClassName   string  `json:"class_name"` // e.g. "EF", "AF41", "BE"
 	DSCPValue   uint8   `json:"dscp_value"`
-	Description string  `json:"description"`  // human-readable
+	Description string  `json:"description"` // human-readable
 	PacketCount uint64  `json:"packet_count"`
 	ByteCount   uint64  `json:"byte_count"`
-	Percentage  float64 `json:"percentage"`   // of total packets
-	Color       string  `json:"color"`        // hex colour for the pie chart
+	Percentage  float64 `json:"percentage"` // of total packets
+	Color       string  `json:"color"`      // hex colour for the pie chart
 }
 
 // QoSFlowEntry is one row in the per-flow DSCP table.
@@ -57,7 +57,7 @@ type QoSFlowEntry struct {
 
 // QoSAlert represents a QoS policy violation or anomaly.
 type QoSAlert struct {
-	Severity    string `json:"severity"`    // "Critical", "Warning", "Info"
+	Severity    string `json:"severity"` // "Critical", "Warning", "Info"
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Flow        string `json:"flow,omitempty"`
@@ -74,12 +74,12 @@ type QoSDSCPComparison struct {
 
 // DSCPComparisonFlow shows how DSCP changed for a specific flow between LAN and WAN.
 type DSCPComparisonFlow struct {
-	Flow      string `json:"flow"`
-	LANClass  string `json:"lan_class"`
-	WANClass  string `json:"wan_class"`
-	LANValue  uint8  `json:"lan_value"`
-	WANValue  uint8  `json:"wan_value"`
-	Status    string `json:"status"` // "Preserved", "Remarked", "Stripped"
+	Flow     string `json:"flow"`
+	LANClass string `json:"lan_class"`
+	WANClass string `json:"wan_class"`
+	LANValue uint8  `json:"lan_value"`
+	WANValue uint8  `json:"wan_value"`
+	Status   string `json:"status"` // "Preserved", "Remarked", "Stripped"
 }
 
 // ─── Colour Palette ─────────────────────────────────────────────

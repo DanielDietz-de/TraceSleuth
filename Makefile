@@ -1,254 +1,256 @@
-# SD-WAN Triage Tool - Makefile
-# Unified build pipeline: React frontend → embedded Go binary
+# TraceSleuth - unified build pipeline
+# React frontend -> embedded Go binary
 
-# ─── VARIABLES ──────────────────────────────────────────────
-BINARY_NAME  := sdwan-triage
-VERSION      ?= 6.1.0.0
+# -----------------------------------------------------------------------------
+# Variables
+# -----------------------------------------------------------------------------
+BINARY_NAME  := tracesleuth
+VERSION_FILE := VERSION
+VERSION      := $(shell tr -d '\r\n' < $(VERSION_FILE) 2>/dev/null)
 BUILD_DIR    := build
-DIST_DIR     := cmd/sdwan-triage/dist
+CMD_DIR      := cmd/sdwan-triage
+DIST_DIR     := $(CMD_DIR)/dist
 FRONTEND_DIR := web/frontend
 GEOIP_DIR    := data
 GEOIP_DB     := $(GEOIP_DIR)/GeoLite2-City.mmdb
 GO           := go
+NPM          := npm
 COMMIT       := $(shell git rev-parse --short HEAD 2>/dev/null || echo "unknown")
 DATE         := $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 LDFLAGS      := -s -w \
-                -X main.version=$(VERSION) \
-                -X main.buildCommit=$(COMMIT) \
-                -X main.buildDate=$(DATE)
+                 -X main.version=$(VERSION) \
+                 -X main.buildCommit=$(COMMIT) \
+                 -X main.buildDate=$(DATE)
 GOFLAGS      := -ldflags '$(LDFLAGS)'
 
-.PHONY: all build build-frontend copy-dist build-backend build-all \
-        build-linux build-darwin build-windows release \
-        clean clean-all test test-coverage test-race \
-        lint fmt vet run run-web help \
-        setup-geoip check-geoip frontend-dev install
+ifeq ($(strip $(VERSION)),)
+$(error VERSION file is missing or empty)
+endif
 
-# ─── DEFAULT ────────────────────────────────────────────────
+.PHONY: all build build-frontend copy-dist copy-geoip build-backend build-all \
+        build-linux build-darwin build-windows release github-release \
+        clean clean-all test test-coverage test-race \
+        lint fmt fmt-check vet run run-web help \
+        setup-geoip check-geoip frontend-dev install check-version
+
+# -----------------------------------------------------------------------------
+# Default
+# -----------------------------------------------------------------------------
 all: build
 
-# ─── FRONTEND ───────────────────────────────────────────────
+check-version:
+	@bash scripts/check-version-contract.sh
+
+# -----------------------------------------------------------------------------
+# Frontend
+# -----------------------------------------------------------------------------
 build-frontend:
-	@echo "📦 Building React frontend..."
-	cd $(FRONTEND_DIR) && npm install --prefer-offline --no-audit && npm run build
-	@echo "✓ Frontend built: $(FRONTEND_DIR)/dist"
+	@echo "Building TraceSleuth React frontend..."
+	cd $(FRONTEND_DIR) && $(NPM) ci && $(NPM) run build
+	@echo "Frontend built: $(FRONTEND_DIR)/dist"
 
 copy-dist: build-frontend
-	@echo "📋 Copying frontend dist into embed directory..."
+	@echo "Copying frontend distribution into the Go embed directory..."
 	@rm -rf $(DIST_DIR)
 	@mkdir -p $(DIST_DIR)
-	cp -r $(FRONTEND_DIR)/dist/* $(DIST_DIR)/
-	@echo "✓ Frontend copied to $(DIST_DIR)"
+	cp -R $(FRONTEND_DIR)/dist/. $(DIST_DIR)/
+	@echo "Frontend staged: $(DIST_DIR)"
 
-# ─── GEOIP EMBED ──────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Optional GeoIP embedding
+# -----------------------------------------------------------------------------
 copy-geoip:
 	@if [ -f "$(GEOIP_DB)" ]; then \
-		echo "🌍 Embedding GeoIP database into binary..."; \
-		mkdir -p cmd/sdwan-triage/data; \
-		cp $(GEOIP_DB) cmd/sdwan-triage/data/GeoLite2-City.mmdb; \
-		echo "✓ GeoIP database staged for embed"; \
+		echo "Embedding GeoIP database..."; \
+		mkdir -p $(CMD_DIR)/data; \
+		cp $(GEOIP_DB) $(CMD_DIR)/data/GeoLite2-City.mmdb; \
+		echo "GeoIP database staged for embed"; \
 	else \
-		echo "⚠️  GeoIP database not found at $(GEOIP_DB) — binary will use disk fallback"; \
-		mkdir -p cmd/sdwan-triage/data; \
-		touch cmd/sdwan-triage/data/.gitkeep; \
+		echo "GeoIP database not found at $(GEOIP_DB); the binary will use the inherited disk fallback where applicable"; \
+		mkdir -p $(CMD_DIR)/data; \
+		touch $(CMD_DIR)/data/.gitkeep; \
 	fi
 
-# ─── BACKEND ───────────────────────────────────────────────
-build-backend: copy-geoip
-	@echo "🔨 Building $(BINARY_NAME) v$(VERSION) ($(COMMIT))..."
+# -----------------------------------------------------------------------------
+# Backend and unified build
+# -----------------------------------------------------------------------------
+build-backend: check-version copy-geoip
+	@echo "Building $(BINARY_NAME) v$(VERSION) ($(COMMIT))..."
 	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=0 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./cmd/sdwan-triage
-	@echo "✓ Built: $(BUILD_DIR)/$(BINARY_NAME)"
+	CGO_ENABLED=0 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME) ./$(CMD_DIR)
+	@echo "Built: $(BUILD_DIR)/$(BINARY_NAME)"
 
-# ─── UNIFIED BUILD (frontend + backend) ────────────────────
 build: copy-dist build-backend
 	@echo ""
-	@echo "══════════════════════════════════════════════════"
-	@echo "  ✓ $(BINARY_NAME) v$(VERSION) ready"
-	@echo "    Binary: $(BUILD_DIR)/$(BINARY_NAME)"
-	@echo "    Commit: $(COMMIT)"
-	@echo "    Date:   $(DATE)"
-	@echo "══════════════════════════════════════════════════"
+	@echo "=================================================="
+	@echo "  $(BINARY_NAME) v$(VERSION) ready"
+	@echo "  Binary: $(BUILD_DIR)/$(BINARY_NAME)"
+	@echo "  Commit: $(COMMIT)"
+	@echo "  Date:   $(DATE)"
+	@echo "=================================================="
 
-# ─── CROSS-COMPILATION ─────────────────────────────────────
-build-linux: copy-dist
-	@echo "🐧 Building for Linux..."
+# -----------------------------------------------------------------------------
+# Cross-compilation
+# -----------------------------------------------------------------------------
+build-linux: copy-dist check-version
 	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/sdwan-triage
-	@echo "✓ $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64"
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./$(CMD_DIR)
 
-build-darwin: copy-dist
-	@echo "🍎 Building for macOS..."
+build-darwin: copy-dist check-version
 	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/sdwan-triage
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/sdwan-triage
-	@echo "🔏 Ad-hoc codesigning macOS binaries..."
-	codesign -s - --force $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64
-	codesign -s - --force $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64
-	@echo "✓ $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64"
-	@echo "✓ $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64"
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./$(CMD_DIR)
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./$(CMD_DIR)
+	@if command -v codesign >/dev/null 2>&1; then \
+		codesign -s - --force $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64; \
+		codesign -s - --force $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64; \
+	else \
+		echo "codesign unavailable; macOS binaries remain unsigned"; \
+	fi
 
-build-windows: copy-dist
-	@echo "🪟 Building for Windows..."
+build-windows: copy-dist check-version
 	@mkdir -p $(BUILD_DIR)
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe ./cmd/sdwan-triage
-	@echo "✓ $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe"
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe ./$(CMD_DIR)
 
 build-all: build-linux build-darwin build-windows
 
-# ─── RELEASE ────────────────────────────────────────────────
-# Builds all platforms, creates checksums, and packages archives
-release: clean copy-dist
-	@echo "🚀 Building release v$(VERSION)..."
+# -----------------------------------------------------------------------------
+# Release artifacts
+# -----------------------------------------------------------------------------
+release: clean copy-dist check-version
+	@echo "Building TraceSleuth release v$(VERSION)..."
 	@mkdir -p $(BUILD_DIR)
-	@# Linux amd64
-	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./cmd/sdwan-triage
-	tar -czf $(BUILD_DIR)/$(BINARY_NAME)-v$(VERSION)-linux-amd64.tar.gz -C $(BUILD_DIR) $(BINARY_NAME)-linux-amd64
-	@# macOS amd64
-	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./cmd/sdwan-triage
-	codesign -s - --force $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64
-	tar -czf $(BUILD_DIR)/$(BINARY_NAME)-v$(VERSION)-darwin-amd64.tar.gz -C $(BUILD_DIR) $(BINARY_NAME)-darwin-amd64
-	@# macOS arm64 (Apple Silicon)
-	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./cmd/sdwan-triage
-	codesign -s - --force $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64
-	tar -czf $(BUILD_DIR)/$(BINARY_NAME)-v$(VERSION)-darwin-arm64.tar.gz -C $(BUILD_DIR) $(BINARY_NAME)-darwin-arm64
-	@# Windows amd64
-	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe ./cmd/sdwan-triage
-	zip -j $(BUILD_DIR)/$(BINARY_NAME)-v$(VERSION)-windows-amd64.zip $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe
-	@# Checksums
-	@echo "🔐 Generating checksums..."
-	cd $(BUILD_DIR) && shasum -a 256 *.tar.gz *.zip > checksums-v$(VERSION).txt
-	@echo ""
-	@echo "══════════════════════════════════════════════════"
-	@echo "  ✓ Release v$(VERSION) artifacts:"
-	@ls -lh $(BUILD_DIR)/*.tar.gz $(BUILD_DIR)/*.zip $(BUILD_DIR)/checksums-*.txt
-	@echo "══════════════════════════════════════════════════"
 
-# ─── GITHUB RELEASE ────────────────────────────────────────
-# Creates a GitHub release with all artifacts
-# Requires: gh CLI authenticated
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-linux-amd64 ./$(CMD_DIR)
+	tar -czf $(BUILD_DIR)/$(BINARY_NAME)-v$(VERSION)-linux-amd64.tar.gz -C $(BUILD_DIR) $(BINARY_NAME)-linux-amd64
+
+	CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64 ./$(CMD_DIR)
+	@if command -v codesign >/dev/null 2>&1; then codesign -s - --force $(BUILD_DIR)/$(BINARY_NAME)-darwin-amd64; fi
+	tar -czf $(BUILD_DIR)/$(BINARY_NAME)-v$(VERSION)-darwin-amd64.tar.gz -C $(BUILD_DIR) $(BINARY_NAME)-darwin-amd64
+
+	CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64 ./$(CMD_DIR)
+	@if command -v codesign >/dev/null 2>&1; then codesign -s - --force $(BUILD_DIR)/$(BINARY_NAME)-darwin-arm64; fi
+	tar -czf $(BUILD_DIR)/$(BINARY_NAME)-v$(VERSION)-darwin-arm64.tar.gz -C $(BUILD_DIR) $(BINARY_NAME)-darwin-arm64
+
+	CGO_ENABLED=0 GOOS=windows GOARCH=amd64 $(GO) build $(GOFLAGS) -o $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe ./$(CMD_DIR)
+	zip -j $(BUILD_DIR)/$(BINARY_NAME)-v$(VERSION)-windows-amd64.zip $(BUILD_DIR)/$(BINARY_NAME)-windows-amd64.exe
+
+	@echo "Generating SHA-256 checksums..."
+	cd $(BUILD_DIR) && shasum -a 256 *.tar.gz *.zip > checksums-v$(VERSION).txt
+	@ls -lh $(BUILD_DIR)/*.tar.gz $(BUILD_DIR)/*.zip $(BUILD_DIR)/checksums-*.txt
+
 github-release: release
-	@echo "🚀 Creating GitHub release v$(VERSION)..."
-	@if ! command -v gh &> /dev/null; then \
-		echo "❌ GitHub CLI (gh) not found. Install: brew install gh"; \
-		exit 1; \
-	fi
-	@if ! gh auth status &> /dev/null; then \
-		echo "❌ Not authenticated. Run: gh auth login"; \
-		exit 1; \
-	fi
+	@command -v gh >/dev/null 2>&1 || { echo "GitHub CLI (gh) is required" >&2; exit 1; }
+	@gh auth status >/dev/null 2>&1 || { echo "GitHub CLI is not authenticated" >&2; exit 1; }
 	gh release create v$(VERSION) \
 		$(BUILD_DIR)/$(BINARY_NAME)-v$(VERSION)-linux-amd64.tar.gz \
 		$(BUILD_DIR)/$(BINARY_NAME)-v$(VERSION)-darwin-amd64.tar.gz \
 		$(BUILD_DIR)/$(BINARY_NAME)-v$(VERSION)-darwin-arm64.tar.gz \
 		$(BUILD_DIR)/$(BINARY_NAME)-v$(VERSION)-windows-amd64.zip \
 		$(BUILD_DIR)/checksums-v$(VERSION).txt \
-		--title "v$(VERSION) - The Wireshark Academy Release" \
+		--title "TraceSleuth v$(VERSION)" \
 		--notes-file RELEASE_NOTES.md \
 		--draft
-	@echo "✓ GitHub release v$(VERSION) created (draft)"
-	@echo "  Review and publish at: https://github.com/gocisse/sdwan-triage/releases"
+	@echo "Draft release created: https://github.com/DanielDietz-de/TraceSleuth/releases"
 
-install: copy-dist
-	$(GO) install $(GOFLAGS) ./cmd/sdwan-triage
+install: copy-dist check-version
+	$(GO) install $(GOFLAGS) ./$(CMD_DIR)
 
-# ─── TEST ───────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Tests and code quality
+# -----------------------------------------------------------------------------
 test:
-	@echo "Running tests..."
-	$(GO) test ./... -v -count=1 -timeout 60s
-	@echo "✓ All tests passed"
+	$(GO) test ./... -v -count=1 -timeout 120s
 
 test-coverage:
-	@echo "Running tests with coverage..."
-	$(GO) test ./... -coverprofile=coverage.out -timeout 60s
+	$(GO) test ./... -coverprofile=coverage.out -timeout 120s
 	$(GO) tool cover -html=coverage.out -o coverage.html
-	@echo "✓ Coverage report: coverage.html"
+	@echo "Coverage report: coverage.html"
 
 test-race:
-	@echo "Running tests with race detector..."
-	$(GO) test ./... -race -count=1 -timeout 120s
+	$(GO) test ./... -race -count=1 -timeout 240s
 
-# ─── CODE QUALITY ───────────────────────────────────────────
 fmt:
 	$(GO) fmt ./...
+
+fmt-check:
+	@unformatted="$$(gofmt -l $$(find . -type f -name '*.go' -not -path './web/releases/*' -not -path './releases/*'))"; \
+	if [ -n "$$unformatted" ]; then printf 'Unformatted Go files:\n%s\n' "$$unformatted" >&2; exit 1; fi
 
 vet:
 	$(GO) vet ./...
 
-lint: fmt vet
-	@echo "✓ Code quality checks passed"
+lint: fmt-check vet
+	@echo "Code quality checks passed"
 
-# ─── GEOIP DATABASE ────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# GeoIP database
+# -----------------------------------------------------------------------------
 setup-geoip:
-	@echo "Setting up GeoIP database..."
 	@mkdir -p $(GEOIP_DIR)
 	@chmod +x scripts/download_geoip.sh
 	@scripts/download_geoip.sh $(GEOIP_DIR)
-	@echo "✓ GeoIP database ready"
 
 check-geoip:
 	@if [ -f "$(GEOIP_DB)" ]; then \
-		echo "✓ GeoIP database found: $(GEOIP_DB)"; \
+		echo "GeoIP database found: $(GEOIP_DB)"; \
 		ls -lh $(GEOIP_DB); \
 	else \
-		echo "✗ GeoIP database not found. Run: make setup-geoip"; \
+		echo "GeoIP database not found. Run: make setup-geoip"; \
 	fi
 
-# ─── FRONTEND DEV ──────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Development and execution
+# -----------------------------------------------------------------------------
 frontend-dev:
-	cd $(FRONTEND_DIR) && npm run dev
+	cd $(FRONTEND_DIR) && $(NPM) run dev
 
-# ─── RUN ────────────────────────────────────────────────────
 run:
-	$(GO) run $(GOFLAGS) ./cmd/sdwan-triage $(ARGS)
+	$(GO) run $(GOFLAGS) ./$(CMD_DIR) $(ARGS)
 
 run-web:
-	$(GO) run $(GOFLAGS) ./cmd/sdwan-triage -web -port 8080
+	$(GO) run $(GOFLAGS) ./$(CMD_DIR) -web -port 8080
 
-# ─── CLEAN ──────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Cleanup
+# -----------------------------------------------------------------------------
 clean:
-	@echo "Cleaning..."
 	rm -rf $(BUILD_DIR)
 	rm -rf $(DIST_DIR)
 	rm -f coverage.out coverage.html
-	@echo "✓ Clean"
 
 clean-all: clean
 	rm -rf $(GEOIP_DIR)/*.mmdb
 
-# ─── HELP ───────────────────────────────────────────────────
+# -----------------------------------------------------------------------------
+# Help
+# -----------------------------------------------------------------------------
 help:
-	@echo "SD-WAN Triage Tool v$(VERSION) - Build Targets"
+	@echo "TraceSleuth v$(VERSION) - Build Targets"
 	@echo ""
-	@echo "  Build Pipeline:"
-	@echo "    make build            Full build: frontend → embed → Go binary"
+	@echo "  Build:"
+	@echo "    make build            Build frontend and embedded Go binary"
 	@echo "    make build-frontend   Build React frontend only"
-	@echo "    make build-backend    Build Go binary only (assumes dist/ exists)"
-	@echo "    make build-all        Cross-compile for Linux, macOS, Windows"
-	@echo "    make release          Build release archives + checksums for all platforms"
-	@echo "    make install          Install to GOPATH/bin"
+	@echo "    make build-backend    Build Go binary only"
+	@echo "    make build-all        Cross-compile Linux, macOS, and Windows"
+	@echo "    make release          Create release archives and checksums"
+	@echo "    make install          Install current command package"
 	@echo ""
-	@echo "  Test:"
-	@echo "    make test             Run all tests"
-	@echo "    make test-coverage    Run tests with coverage report"
-	@echo "    make test-race        Run tests with race detector"
-	@echo ""
-	@echo "  Code Quality:"
-	@echo "    make fmt              Format code"
+	@echo "  Test and quality:"
+	@echo "    make test             Run Go tests"
+	@echo "    make test-coverage    Generate Go coverage report"
+	@echo "    make test-race        Run Go race detector"
+	@echo "    make fmt-check        Verify gofmt cleanliness"
 	@echo "    make vet              Run go vet"
-	@echo "    make lint             Run all linters"
-	@echo ""
-	@echo "  GeoIP:"
-	@echo "    make setup-geoip      Download GeoIP database"
-	@echo "    make check-geoip      Check if GeoIP database exists"
+	@echo "    make lint             Run formatting and vet checks"
+	@echo "    make check-version    Validate bootstrap version contract"
 	@echo ""
 	@echo "  Run:"
-	@echo "    make run ARGS='...'   Run CLI mode with arguments"
-	@echo "    make run-web          Run web application mode"
-	@echo "    make frontend-dev     Start frontend dev server"
+	@echo "    make run ARGS='...'   Run CLI mode"
+	@echo "    make run-web          Run local web mode"
+	@echo "    make frontend-dev     Start frontend development server"
 	@echo ""
 	@echo "  Clean:"
 	@echo "    make clean            Remove build artifacts"
-	@echo "    make clean-all        Remove build artifacts and GeoIP data"
+	@echo "    make clean-all        Also remove GeoIP data"
 	@echo ""
 	@echo "  Version: $(VERSION) | Commit: $(COMMIT) | Date: $(DATE)"

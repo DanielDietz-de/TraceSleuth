@@ -426,7 +426,6 @@ func (l *LANProtocolAnalyzer) analyzeLLDP(packet gopacket.Packet, eth *layers.Et
 
 		switch tlvType {
 		case 0: // End of LLDPDU
-			break
 		case 1: // Chassis ID
 			if len(tlvData) > 1 {
 				device.ChassisID = parseLLDPString(tlvData[1:])

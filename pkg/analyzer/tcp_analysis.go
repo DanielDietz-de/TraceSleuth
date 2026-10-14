@@ -74,8 +74,8 @@ type tcpFlowState struct {
 	// pure ACK (payload=0, !SYN, !FIN, !RST) and a running duplicate count.
 	lastAckNum      uint32
 	lastAckValid    bool
-	lastAckPayload  int  // 0 = pure ACK
-	duplicateAckCnt int  // Count of repeats of lastAckNum
+	lastAckPayload  int // 0 = pure ACK
+	duplicateAckCnt int // Count of repeats of lastAckNum
 
 	// Retransmission detection via a compact (seq, payload) set.
 	seenSegments map[uint64]struct{}

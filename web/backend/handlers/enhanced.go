@@ -71,22 +71,22 @@ type CompareRequest struct {
 
 // CompareMetric represents a single comparison metric
 type CompareMetric struct {
-	Label      string  `json:"label"`
-	Baseline   float64 `json:"baseline"`
-	Current    float64 `json:"current"`
-	Change     float64 `json:"change_pct"`
-	Improved   bool    `json:"improved"`
-	Unit       string  `json:"unit"`
+	Label    string  `json:"label"`
+	Baseline float64 `json:"baseline"`
+	Current  float64 `json:"current"`
+	Change   float64 `json:"change_pct"`
+	Improved bool    `json:"improved"`
+	Unit     string  `json:"unit"`
 }
 
 // CompareResponse is the API response for comparing two analyses
 type CompareResponse struct {
-	BaselineID   string          `json:"baseline_id"`
-	CurrentID    string          `json:"current_id"`
-	Metrics      []CompareMetric `json:"metrics"`
-	NewIssues    []string        `json:"new_issues"`
-	ResolvedIssues []string      `json:"resolved_issues"`
-	Summary      string          `json:"summary"`
+	BaselineID     string          `json:"baseline_id"`
+	CurrentID      string          `json:"current_id"`
+	Metrics        []CompareMetric `json:"metrics"`
+	NewIssues      []string        `json:"new_issues"`
+	ResolvedIssues []string        `json:"resolved_issues"`
+	Summary        string          `json:"summary"`
 }
 
 // GetTopology generates network topology from analysis results

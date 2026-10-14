@@ -121,10 +121,10 @@ func writeTempPCAP(t *testing.T, data []byte, name string) string {
 // ─── Common packet definitions ─────────────────────────────────────
 
 var (
-	lanIP  = [4]byte{192, 168, 1, 10}
-	wanIP  = [4]byte{10, 0, 0, 1}
-	bfdIP  = [4]byte{10, 0, 0, 2}
-	natIP  = [4]byte{203, 0, 113, 5} // public NAT IP
+	lanIP = [4]byte{192, 168, 1, 10}
+	wanIP = [4]byte{10, 0, 0, 1}
+	bfdIP = [4]byte{10, 0, 0, 2}
+	natIP = [4]byte{203, 0, 113, 5} // public NAT IP
 )
 
 // ─── Test Cases ────────────────────────────────────────────────────
@@ -306,7 +306,7 @@ func TestCompareStreaming_MultipleFlows(t *testing.T) {
 		srcPort: 44444, dstPort: 80,
 		proto: 6, ttl: 64, seqNum: 200,
 		tcpFlag: 0x02,
-		tsOff: 5 * time.Millisecond,
+		tsOff:   5 * time.Millisecond,
 	}
 
 	fileA := writeTempPCAP(t, buildTestPCAP([]testPacket{flow1LAN, flow2LAN}), "lan.pcap")

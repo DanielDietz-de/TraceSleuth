@@ -433,7 +433,7 @@ func TestValidateSDWANTunnels(t *testing.T) {
 func TestTunnelAnalyzer_NewTunnelAnalyzer(t *testing.T) {
 	analyzer := NewTunnelAnalyzer()
 	if analyzer == nil {
-		t.Error("NewTunnelAnalyzer returned nil")
+		t.Fatal("NewTunnelAnalyzer returned nil")
 	}
 	if analyzer.tunnels == nil {
 		t.Error("tunnels map not initialized")

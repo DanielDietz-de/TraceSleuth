@@ -1,0 +1,26 @@
+title = "TraceSleuth secret scanning"
+
+[extend]
+useDefault = true
+
+# The imported baseline contains generated frontend bundles, frozen historical
+# release trees, binaries, and archives that are already inventoried as
+# repository-hygiene debt. These paths are excluded from current-tree secret
+# scanning until they are removed in a dedicated cleanup change. Source code,
+# configuration, workflows, documentation, and new changes remain scanned.
+[allowlist]
+description = "Inherited generated artifacts and explicit synthetic credential placeholders"
+paths = [
+  '''(^|/)releases/''',
+  '''(^|/)web/releases/''',
+  '''(^|/)web/frontend/dist/''',
+  '''(^|/)cmd/sdwan-triage/dist/''',
+  '''(^|/)sdwan-triage$''',
+  '''(^|/)data/GeoLite2-City\.mmdb$'''
+]
+regexes = [
+  '''replace-with-a-strong-unique-password''',
+  '''correct-horse-battery-staple''',
+  '''a-strong-test-password''',
+  '''too-short'''
+]

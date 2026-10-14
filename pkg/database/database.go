@@ -9,11 +9,19 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"os"
+	"strings"
 	"sync"
 	"time"
 
-	_ "modernc.org/sqlite"
 	"golang.org/x/crypto/bcrypt"
+	_ "modernc.org/sqlite"
+)
+
+const (
+	bootstrapAdminUsernameEnv = "TRACESLEUTH_BOOTSTRAP_ADMIN_USERNAME"
+	bootstrapAdminPasswordEnv = "TRACESLEUTH_BOOTSTRAP_ADMIN_PASSWORD"
+	minimumPasswordLength     = 12
 )
 
 // UserRole defines the role-based access control levels.
@@ -43,14 +51,17 @@ type DB struct {
 	mu   sync.RWMutex
 }
 
-// Open initializes the SQLite database at the given path, creates tables, and seeds defaults.
+// Open initializes the SQLite database at the given path, creates tables, and
+// securely bootstraps the first administrator only when explicit environment
+// variables are supplied. TraceSleuth never creates a universal default
+// credential.
 func Open(dbPath string) (*DB, error) {
 	conn, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open database: %w", err)
 	}
 
-	// SQLite performance pragmas
+	// SQLite performance pragmas.
 	pragmas := []string{
 		"PRAGMA journal_mode=WAL",
 		"PRAGMA synchronous=NORMAL",
@@ -71,9 +82,9 @@ func Open(dbPath string) (*DB, error) {
 		return nil, fmt.Errorf("migration failed: %w", err)
 	}
 
-	if err := db.seedDefaultAdmin(); err != nil {
+	if err := db.bootstrapAdminFromEnvironment(); err != nil {
 		conn.Close()
-		return nil, fmt.Errorf("seeding failed: %w", err)
+		return nil, fmt.Errorf("administrator bootstrap failed: %w", err)
 	}
 
 	return db, nil
@@ -114,8 +125,10 @@ func (db *DB) migrate() error {
 	return err
 }
 
-// seedDefaultAdmin creates the default admin user if the users table is empty.
-func (db *DB) seedDefaultAdmin() error {
+// bootstrapAdminFromEnvironment creates the first administrator only when the
+// database contains no users and both bootstrap environment variables are set.
+// The password is never logged.
+func (db *DB) bootstrapAdminFromEnvironment() error {
 	var count int
 	if err := db.conn.QueryRow("SELECT COUNT(*) FROM users").Scan(&count); err != nil {
 		return err
@@ -124,25 +137,38 @@ func (db *DB) seedDefaultAdmin() error {
 		return nil
 	}
 
-	hash, err := bcrypt.GenerateFromPassword([]byte("admin"), bcrypt.DefaultCost)
-	if err != nil {
-		return fmt.Errorf("failed to hash default password: %w", err)
+	username := strings.TrimSpace(os.Getenv(bootstrapAdminUsernameEnv))
+	password := os.Getenv(bootstrapAdminPasswordEnv)
+
+	if username == "" && password == "" {
+		log.Printf(
+			"TraceSleuth has no users. Set %s and %s before first start to create the initial administrator.",
+			bootstrapAdminUsernameEnv,
+			bootstrapAdminPasswordEnv,
+		)
+		return nil
 	}
 
-	_, err = db.conn.Exec(
+	if username == "" || password == "" {
+		return fmt.Errorf("%s and %s must either both be set or both be unset", bootstrapAdminUsernameEnv, bootstrapAdminPasswordEnv)
+	}
+	if len(password) < minimumPasswordLength {
+		return fmt.Errorf("%s must contain at least %d characters", bootstrapAdminPasswordEnv, minimumPasswordLength)
+	}
+
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash bootstrap administrator password: %w", err)
+	}
+
+	if _, err = db.conn.Exec(
 		"INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)",
-		"admin", string(hash), string(RoleAdmin),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to insert default admin: %w", err)
+		username, string(hash), string(RoleAdmin),
+	); err != nil {
+		return fmt.Errorf("failed to insert bootstrap administrator: %w", err)
 	}
 
-	log.Println("╔══════════════════════════════════════════════════════════════╗")
-	log.Println("║  ⚠  WARNING: Default admin user created.                    ║")
-	log.Println("║  Username: admin  |  Password: admin                        ║")
-	log.Println("║  PLEASE CHANGE THE PASSWORD IMMEDIATELY.                    ║")
-	log.Println("╚══════════════════════════════════════════════════════════════╝")
-
+	log.Printf("TraceSleuth bootstrap administrator %q created successfully; the password was not logged.", username)
 	return nil
 }
 
@@ -171,9 +197,11 @@ func (db *DB) Authenticate(username, password string) (*User, error) {
 		return nil, fmt.Errorf("invalid credentials")
 	}
 
-	// Update last login timestamp
+	// Update last login timestamp.
 	now := time.Now().UTC().Format(time.RFC3339)
-	db.conn.Exec("UPDATE users SET last_login = ?, updated_at = ? WHERE id = ?", now, now, user.ID)
+	if _, err := db.conn.Exec("UPDATE users SET last_login = ?, updated_at = ? WHERE id = ?", now, now, user.ID); err != nil {
+		return nil, fmt.Errorf("failed to update last-login timestamp: %w", err)
+	}
 
 	return user, nil
 }
@@ -215,8 +243,28 @@ func (db *DB) CreateUser(username, password string, role UserRole) (*User, error
 		return nil, fmt.Errorf("failed to create user: %w", err)
 	}
 
-	id, _ := result.LastInsertId()
-	return db.GetUserByID(id)
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, fmt.Errorf("failed to read created user ID: %w", err)
+	}
+	return db.getUserByIDUnlocked(id)
+}
+
+// getUserByIDUnlocked retrieves a user without acquiring db.mu. Callers must
+// already hold the appropriate lock.
+func (db *DB) getUserByIDUnlocked(id int64) (*User, error) {
+	user := &User{}
+	err := db.conn.QueryRow(
+		"SELECT id, username, password_hash, role, created_at, updated_at, last_login, is_active FROM users WHERE id = ?",
+		id,
+	).Scan(&user.ID, &user.Username, &user.PasswordHash, &user.Role, &user.CreatedAt, &user.UpdatedAt, &user.LastLogin, &user.IsActive)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("user not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("database error: %w", err)
+	}
+	return user, nil
 }
 
 // ChangePassword updates a user's password.
@@ -237,7 +285,7 @@ func (db *DB) ChangePassword(userID int64, newPassword string) error {
 	return err
 }
 
-// ListUsers returns all users (without password hashes).
+// ListUsers returns all users (without password hashes in JSON output).
 func (db *DB) ListUsers() ([]*User, error) {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
@@ -262,8 +310,13 @@ func (db *DB) ListUsers() ([]*User, error) {
 }
 
 // GenerateSessionID creates a cryptographically random session identifier.
+// This legacy helper keeps its string-only signature for compatibility. It
+// returns an empty string if the operating system CSPRNG fails; callers must
+// reject an empty identifier.
 func GenerateSessionID() string {
 	b := make([]byte, 32)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return ""
+	}
 	return hex.EncodeToString(b)
 }

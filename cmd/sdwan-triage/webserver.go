@@ -28,12 +28,12 @@ import (
 )
 
 const (
-	defaultWebPort   = 8080
-	serverAddress    = "127.0.0.1"
+	defaultWebPort       = 8080
+	serverAddress        = "127.0.0.1"
 	multipartMemoryLimit = 8 << 20 // Keep multipart parsing bounded in RAM
-	portRetryRange   = 10
-	shutdownTimeout  = 30 * time.Second
-	serverStartDelay = 200 * time.Millisecond
+	portRetryRange       = 10
+	shutdownTimeout      = 30 * time.Second
+	serverStartDelay     = 200 * time.Millisecond
 )
 
 // findAvailablePort tries the requested port, then scans up to portRetryRange ports above it.

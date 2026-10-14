@@ -151,4 +151,3 @@ func (h *ComparisonHandlers) PostCompareJobs(c *gin.Context) {
 	// It's a simpler alternative — documented but not wired until storage is injected.
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "Use /api/compare-pcap with direct file uploads"})
 }
-

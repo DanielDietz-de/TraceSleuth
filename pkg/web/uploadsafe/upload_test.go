@@ -60,11 +60,17 @@ func TestLimitRequestKnownAndStreamingBodies(t *testing.T) {
 		req.ContentLength = length
 		err := LimitRequest(httptest.NewRecorder(), req, 3)
 		if length == 5 {
-			if !IsTooLarge(err) { t.Fatalf("expected size error for known length: %v", err) }
+			if !IsTooLarge(err) {
+				t.Fatalf("expected size error for known length: %v", err)
+			}
 		} else {
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			_, err = io.ReadAll(req.Body)
-			if !IsTooLarge(err) { t.Fatalf("expected streaming size error: %v", err) }
+			if !IsTooLarge(err) {
+				t.Fatalf("expected streaming size error: %v", err)
+			}
 		}
 	}
 }

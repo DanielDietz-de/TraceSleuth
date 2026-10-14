@@ -14,10 +14,10 @@ import (
 )
 
 const (
-	MaxCaptureBytes = int64(500 << 20)
-	MaxKeyLogBytes = int64(10 << 20)
-	multipartOverheadBytes = int64(1 << 20)
-	MaxSingleRequestBytes = MaxCaptureBytes + MaxKeyLogBytes + multipartOverheadBytes
+	MaxCaptureBytes           = int64(500 << 20)
+	MaxKeyLogBytes            = int64(10 << 20)
+	multipartOverheadBytes    = int64(1 << 20)
+	MaxSingleRequestBytes     = MaxCaptureBytes + MaxKeyLogBytes + multipartOverheadBytes
 	MaxComparisonRequestBytes = 2*MaxCaptureBytes + MaxKeyLogBytes + multipartOverheadBytes
 )
 

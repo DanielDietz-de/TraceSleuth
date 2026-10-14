@@ -15,6 +15,8 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
+	"github.com/google/uuid"
+	"github.com/gocisse/sdwan-triage/pkg/web/uploadsafe"
 )
 
 // AnalysisStatus represents the current state of an analysis job
@@ -93,7 +95,7 @@ func NewStorage() (*Storage, error) {
 	resultsDir := filepath.Join(dataDir, "results")
 
 	for _, dir := range []string{dataDir, uploadsDir, resultsDir} {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0700); err != nil {
 			mini.Close()
 			return nil, fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
@@ -351,28 +353,14 @@ func (s *Storage) Unsubscribe(jobID string, ch chan *AnalysisJob) {
 	}
 }
 
-// SaveUploadedFile saves an uploaded file to the uploads directory
+// SaveUploadedFile writes an untrusted upload under an opaque server-generated name.
+// The client-supplied filename is metadata only and is never used as a path.
 func (s *Storage) SaveUploadedFile(id string, reader io.Reader, fileName string) (string, error) {
-	// Create job-specific directory
+	if _, err := uuid.Parse(id); err != nil {
+		return "", fmt.Errorf("invalid analysis job ID: %w", err)
+	}
 	jobDir := filepath.Join(s.uploadsDir, id)
-	if err := os.MkdirAll(jobDir, 0755); err != nil {
-		return "", fmt.Errorf("failed to create upload directory: %w", err)
-	}
-
-	// Save file
-	filePath := filepath.Join(jobDir, fileName)
-	file, err := os.Create(filePath)
-	if err != nil {
-		return "", fmt.Errorf("failed to create file: %w", err)
-	}
-	defer file.Close()
-
-	if _, err := io.Copy(file, reader); err != nil {
-		os.Remove(filePath)
-		return "", fmt.Errorf("failed to save file: %w", err)
-	}
-
-	return filePath, nil
+	return uploadsafe.SaveFileInDir(jobDir, fileName, reader, uploadsafe.MaxCaptureBytes)
 }
 
 // GetResultsFile returns the path to a results file

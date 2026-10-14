@@ -30,7 +30,7 @@ import (
 const (
 	defaultWebPort   = 8080
 	serverAddress    = "127.0.0.1"
-	maxUploadSize    = 500 << 20 // 500MB
+	multipartMemoryLimit = 8 << 20 // Keep multipart parsing bounded in RAM
 	portRetryRange   = 10
 	shutdownTimeout  = 30 * time.Second
 	serverStartDelay = 200 * time.Millisecond
@@ -116,7 +116,7 @@ func runWebServer(port int, noBrowser bool, intOpts *IntegrationOptions) {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	router.MaxMultipartMemory = maxUploadSize
+	router.MaxMultipartMemory = multipartMemoryLimit
 
 	// ── API Rate Limiting ──────────────────────────────────────
 	router.Use(middleware.RateLimitMiddleware(middleware.RateLimitConfig{

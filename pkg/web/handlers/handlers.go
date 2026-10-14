@@ -17,6 +17,7 @@ import (
 	"github.com/gocisse/sdwan-triage/pkg/intelligence"
 	"github.com/gocisse/sdwan-triage/pkg/metrics"
 	"github.com/gocisse/sdwan-triage/pkg/web/storage"
+	"github.com/gocisse/sdwan-triage/pkg/web/uploadsafe"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )
@@ -125,13 +126,19 @@ var AllowedExtensions = map[string]bool{
 
 // UploadFile handles PCAP file uploads
 func (h *Handlers) UploadFile(c *gin.Context) {
-	// Get the file from the request
+	if err := uploadsafe.LimitRequest(c.Writer, c.Request, uploadsafe.MaxSingleRequestBytes); err != nil {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "Upload exceeds request size limit"})
+		return
+	}
+	defer uploadsafe.CleanupMultipart(c.Request)
+
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "No file provided",
-			"details": err.Error(),
-		})
+		if uploadsafe.IsTooLarge(err) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "Upload exceeds request size limit"})
+		} else {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "No file provided"})
+		}
 		return
 	}
 	defer file.Close()
@@ -146,14 +153,28 @@ func (h *Handlers) UploadFile(c *gin.Context) {
 		return
 	}
 
-	// Validate file size (500MB max)
-	const maxSize = 500 << 20
-	if header.Size > maxSize {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "File too large",
-			"details": fmt.Sprintf("Maximum file size is 500MB. Got: %d MB", header.Size/1024/1024),
-		})
+	// Multipart field sizes are checked before writing data to disk; the
+	// request is also capped at the HTTP boundary, including overhead.
+	if header.Size > uploadsafe.MaxCaptureBytes {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "Capture exceeds 500 MiB limit"})
 		return
+	}
+	keyFile, keyHeader, keyErr := c.Request.FormFile("keylog")
+	if keyErr != nil && keyErr != http.ErrMissingFile {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid key log upload"})
+		return
+	}
+	if keyFile != nil {
+		defer keyFile.Close()
+		keyExt := strings.ToLower(filepath.Ext(keyHeader.Filename))
+		if keyHeader.Size > uploadsafe.MaxKeyLogBytes {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "Key log exceeds 10 MiB limit"})
+			return
+		}
+		if keyExt != ".log" && keyExt != ".txt" && keyExt != ".keys" && keyExt != "" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid key log extension"})
+			return
+		}
 	}
 
 	// Generate unique ID for this analysis
@@ -181,17 +202,20 @@ func (h *Handlers) UploadFile(c *gin.Context) {
 		return
 	}
 
-	// Optional: SSL Key Log file for TLS decryption (C4)
-	if keyFile, keyHeader, err := c.Request.FormFile("keylog"); err == nil {
-		defer keyFile.Close()
-		keyExt := strings.ToLower(filepath.Ext(keyHeader.Filename))
-		// Accept .log, .txt, or no-extension key log files
-		if keyExt == ".log" || keyExt == ".txt" || keyExt == "" || keyExt == ".keys" {
-			keyPath, err := h.store.SaveUploadedFile(id, keyFile, "sslkeylog_"+keyHeader.Filename)
-			if err == nil {
-				job.KeyLogPath = keyPath
-				h.store.UpdateJob(job)
-			}
+	// Optional SSL key logs are separately capped above; a storage failure
+	// must not silently turn a requested TLS-decryption analysis into plaintext-only.
+	if keyFile != nil {
+		keyPath, err := h.store.SaveUploadedFile(id, keyFile, "sslkeylog_"+keyHeader.Filename)
+		if err != nil {
+			_ = h.store.DeleteJob(id)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save key log"})
+			return
+		}
+		job.KeyLogPath = keyPath
+		if err := h.store.UpdateJob(job); err != nil {
+			_ = h.store.DeleteJob(id)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update analysis job"})
+			return
 		}
 	}
 

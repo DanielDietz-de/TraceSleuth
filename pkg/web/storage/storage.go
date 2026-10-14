@@ -337,11 +337,9 @@ func (s *Storage) DeleteJob(id string) error {
 			}
 		}
 	}
-	// Only remove known UUID directories, never arbitrary paths.
-	if _, err := uuid.Parse(id); err == nil {
-		os.Remove(filepath.Join(s.uploadsDir, id))
-		os.Remove(filepath.Join(s.resultsDir, id))
-	}
+	// Do not construct directory-removal paths from a request or persisted ID.
+	// Empty owner-private job directories are intentionally left for a future
+	// root-scoped retention sweep; no attacker-controlled path is removed.
 
 	// Delete from Redis
 	ctx := context.Background()
@@ -456,11 +454,12 @@ func (s *Storage) GetResultsFile(id, fileType string) (string, error) {
 
 // GetResultsPath returns the JSON results path for a job, or empty string if not available
 func (s *Storage) GetResultsPath(id string) string {
-	job, err := s.GetJob(id)
+	// Every result-reading API must pass through the same containment check.
+	path, err := s.GetResultsFile(id, "json")
 	if err != nil {
 		return ""
 	}
-	return job.ResultsPath
+	return path
 }
 
 // ListJobs returns completed analysis jobs (simplified version for trends)

@@ -25,7 +25,15 @@ func parseUpload(c *gin.Context, totalBytes int64) error {
 		return &http.MaxBytesError{Limit: totalBytes}
 	}
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, totalBytes)
-	return c.Request.ParseMultipartForm(maxMultipartMemory)
+	err := c.Request.ParseMultipartForm(maxMultipartMemory)
+	// net/http can populate MultipartForm and write multipart-* temp files even
+	// when ParseForm (e.g. a malformed query string) returns an error. Cleanup
+	// cannot be deferred solely by the caller after a successful parse.
+	if err != nil && c.Request.MultipartForm != nil {
+		_ = c.Request.MultipartForm.RemoveAll()
+		c.Request.MultipartForm = nil
+	}
+	return err
 }
 
 func rejectUploadError(c *gin.Context, err error) {

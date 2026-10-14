@@ -18,6 +18,19 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
 
 ## [0.1.1] - 2026-10-14
 
+### Review-driven hardening
+
+- Remove disk-backed multipart temporary files even on parsing failures.
+- Route every results accessor through the same containment validation.
+- Align Vite development WebSocket proxy with strict browser same-origin checks,
+  and restore polling fallback after a failed initial WebSocket connection.
+- Restrict progress WebSocket identifiers to server-issued UUIDs and use a
+  same-origin relative endpoint in the browser.
+- Disable the unauthenticated, duplicated historical web/backend executable.
+  The legacy web/build.sh script now invokes the canonical authenticated build.
+
+
+
 ### Security
 
 - Enforce per-request multipart byte ceilings before parsing, plus independent

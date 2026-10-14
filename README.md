@@ -223,6 +223,15 @@ tracesleuth version
 
 Those target commands must not be assumed implemented until the CLI migration is complete.
 
+## Single supported server
+
+The historical upstream standalone server under `web/backend/` is **retired**
+because it bypassed modern authentication and capture-upload protections.
+Do not run historical `sdwan-triage-web` binaries from `web/releases/`.
+The only supported build and runtime are `make build` and
+`./build/tracesleuth -web`. The `web/build.sh` compatibility wrapper now
+uses the same canonical build rather than publishing the unprotected server.
+
 ## Current runtime architecture
 
 The inherited runtime currently follows this shape:

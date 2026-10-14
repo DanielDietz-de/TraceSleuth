@@ -114,6 +114,9 @@ func TestStorageRejectsUnmanagedResultAndDeletion(t *testing.T) {
 	if _, err := store.GetResultsFile(id, "json"); err == nil {
 		t.Fatal("served a results path outside managed storage")
 	}
+	if path := store.GetResultsPath(id); path != "" {
+		t.Fatalf("unmanaged results path leaked through compatibility accessor: %s", path)
+	}
 	if err := store.DeleteJob(id); err == nil {
 		t.Fatal("deleted a job with unmanaged persisted file paths")
 	}

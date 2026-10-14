@@ -3,6 +3,7 @@ package handlers
 import (
 	"bytes"
 	"errors"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -38,6 +39,8 @@ func TestWebSocketOriginMustMatchRequestHostExactly(t *testing.T) {
 	}{
 		{"http://localhost:8080", true},
 		{"https://localhost:8080", true},
+		{"http://localhost:3000", false}, // Host must be forwarded unchanged by Vite
+		{"http://127.0.0.1:8080", false},
 		{"http://localhost.attacker.test:8080", false},
 		{"http://127.0.0.1:8080", false},
 		{"http://localhost:9999", false},
@@ -92,5 +95,53 @@ func TestComparisonTempFilesArePrivateAndBounded(t *testing.T) {
 	p, err := saveComparisonFile(strings.NewReader("12345"), dir, "capture-b-", 4)
 	if p != "" || !errors.Is(err, storage.ErrUploadTooLarge) {
 		t.Fatalf("oversize comparison: path=%q err=%v", p, err)
+	}
+}
+
+// A valid multipart body paired with an invalid URL query can produce a
+// ParseMultipartForm error after the multipart stream has already spilled
+// payload into multipart-* files. Those files must be removed on errors.
+func TestMultipartParseErrorRemovesTemporaryFiles(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	tmp := t.TempDir()
+	t.Setenv("TMPDIR", tmp)
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "capture.pcap")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(bytes.Repeat([]byte("x"), int(maxMultipartMemory)+1024)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/?bad;query=x", &body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	router := gin.New()
+	router.POST("/", func(c *gin.Context) {
+		err := parseUpload(c, int64(body.Len()+1024))
+		if err == nil {
+			c.Request.MultipartForm.RemoveAll()
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "malformed query accepted"})
+			return
+		}
+		rejectUploadError(c, err)
+	})
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected malformed request failure; got %d: %s", w.Code, w.Body.String())
+	}
+	if req.MultipartForm != nil {
+		t.Fatal("multipart form was not cleaned after parse failure")
+	}
+	files, err := os.ReadDir(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) > 0 {
+		t.Fatalf("temporary multipart files leaked: %+v", files)
 	}
 }

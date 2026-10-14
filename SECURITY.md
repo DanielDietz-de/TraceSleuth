@@ -99,6 +99,11 @@ TraceSleuth `0.1.1` is explicitly not production-ready. The baseline audit docum
 - WebSocket JWTs are no longer accepted as URL query parameters (client and server updated together);
 - WebSocket browser Origin matching is exact rather than prefix-based.
 
+The historical `web/backend` server and `web/releases/v4.3.0` binary
+artifacts are explicitly retired: do not execute or distribute them. The old
+backend lacked the current authentication and upload controls. Only the root
+TraceSleuth binary built with `make build` is maintained.
+
 **Compatibility:** Frontends from before 0.1.1 use query-token WebSockets and must be updated in lockstep with the backend. WebSocket subprotocols still contain bearer credentials, so terminate TLS at a trusted reverse proxy for remote use and never log WebSocket request headers.
 
 Known remaining hardening work includes, but is not limited to:

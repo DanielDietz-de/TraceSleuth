@@ -1,7 +1,7 @@
 // Custom hook for WebSocket connection management
 
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { getAuthToken, getAnalysisStatus } from '../api/client';
+import { getAuthToken, getAnalysisStatus, isValidProgressJobId } from '../api/client';
 import type { AnalysisJob } from '../types';
 
 interface UseWebSocketOptions {
@@ -119,13 +119,17 @@ export function useWebSocket(
       return;
     }
 
+    if (!isValidProgressJobId(currentJobId)) {
+      setError(new Error('Invalid analysis job identifier'));
+      return;
+    }
     setIsConnecting(true);
     setError(null);
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
     const token = getAuthToken();
-    const wsUrl = protocol + '//' + host + '/api/ws/' + currentJobId;
+    // Relative WebSocket URLs resolve to the current origin automatically,
+    // so neither caller input nor a query parameter controls the endpoint.
+    const wsUrl = '/api/ws/' + encodeURIComponent(currentJobId);
     console.log('[WS] Connecting to ' + wsUrl);
     const ws = new WebSocket(wsUrl, token ? ['tracesleuth.jwt.' + token] : []);
 
@@ -173,7 +177,7 @@ export function useWebSocket(
 
       // Only reconnect if job is still analyzing and we haven't exceeded attempts
       if (
-        lastStatusRef.current === 'analyzing' &&
+        (lastStatusRef.current === null || lastStatusRef.current === 'analyzing') &&
         event.code !== 1000 // Don't reconnect on normal close
       ) {
         if (reconnectCountRef.current < reconnectAttempts) {

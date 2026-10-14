@@ -166,7 +166,7 @@ Validation:
 
 ### Requirements
 
-- Go version declared by `go.mod`.
+- Go 1.26.9 or newer (see `go.mod`; use a supported security-patched release).
 - Node.js 24 for the frontend build.
 - npm with the committed lockfile.
 - `make` for the unified build path.

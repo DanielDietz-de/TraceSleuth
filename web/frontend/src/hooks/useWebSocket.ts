@@ -190,7 +190,7 @@ export function useWebSocket(
     };
 
     wsRef.current = ws;
-  }, [reconnectAttempts, reconnectInterval, disconnect, startPolling]);
+  }, [reconnectAttempts, reconnectInterval, startPolling]);
 
   // Auto-connect when jobId changes
   useEffect(() => {

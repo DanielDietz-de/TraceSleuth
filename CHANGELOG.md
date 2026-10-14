@@ -31,6 +31,9 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
   WebSockets to a dedicated handshake subprotocol; enforce exact-origin checks.
 - Persist and delete TLS key-log files correctly; sanitize display/download
   filenames to prevent header injection.
+- Raise the minimum Go toolchain to supported Go 1.26.9 (October 2026
+  security release); update x/net to 0.60.0 and Gorilla WebSocket to 1.5.3,
+  with the necessary x/crypto, x/sys and x/text dependency changes.
 - Add focused Go regression tests for upload limits, traversal prevention,
   storage containment, WebSocket origin/token handling and key-log lifecycle.
 

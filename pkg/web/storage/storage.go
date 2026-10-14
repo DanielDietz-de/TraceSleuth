@@ -10,8 +10,11 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/google/uuid"
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/redis/go-redis/v9"
@@ -63,6 +66,14 @@ type Storage struct {
 }
 
 // NewStorage creates a new storage instance with embedded Redis
+// Upload bounds apply to actual bytes copied, not only multipart metadata.
+const (
+	MaxCaptureBytes int64 = 500 << 20
+	MaxKeyLogBytes  int64 = 8 << 20
+)
+
+var ErrUploadTooLarge = fmt.Errorf("uploaded file exceeds configured size limit")
+
 func NewStorage() (*Storage, error) {
 	// Start embedded Redis
 	mini, err := miniredis.Run()
@@ -93,9 +104,14 @@ func NewStorage() (*Storage, error) {
 	resultsDir := filepath.Join(dataDir, "results")
 
 	for _, dir := range []string{dataDir, uploadsDir, resultsDir} {
-		if err := os.MkdirAll(dir, 0755); err != nil {
+		if err := os.MkdirAll(dir, 0700); err != nil {
 			mini.Close()
 			return nil, fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
+		// Older installations may have created these sensitive paths world-readable.
+		if err := os.Chmod(dir, 0700); err != nil {
+			mini.Close()
+			return nil, fmt.Errorf("failed to restrict data directory %s: %w", dir, err)
 		}
 	}
 
@@ -302,16 +318,28 @@ func (s *Storage) DeleteJob(id string) error {
 		return err
 	}
 
-	// Delete files
-	if job.FilePath != "" {
-		os.Remove(job.FilePath)
+	// Refuse to remove any path outside the managed directories, including
+	// paths from persisted legacy metadata that may contain traversal input.
+	for _, f := range []struct{ root, path string }{
+		{s.uploadsDir, job.FilePath},
+		{s.uploadsDir, job.KeyLogPath},
+		{s.resultsDir, job.ResultsPath},
+		{s.resultsDir, job.HTMLPath},
+	} {
+		if f.path != "" && !isManagedFile(f.root, f.path) {
+			return fmt.Errorf("refusing to delete unmanaged analysis file")
+		}
 	}
-	if job.ResultsPath != "" {
-		os.Remove(job.ResultsPath)
+	for _, path := range []string{job.FilePath, job.KeyLogPath, job.ResultsPath, job.HTMLPath} {
+		if path != "" {
+			if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+		}
 	}
-	if job.HTMLPath != "" {
-		os.Remove(job.HTMLPath)
-	}
+	// Do not construct directory-removal paths from a request or persisted ID.
+	// Empty owner-private job directories are intentionally left for a future
+	// root-scoped retention sweep; no attacker-controlled path is removed.
 
 	// Delete from Redis
 	ctx := context.Background()
@@ -351,27 +379,47 @@ func (s *Storage) Unsubscribe(jobID string, ch chan *AnalysisJob) {
 	}
 }
 
-// SaveUploadedFile saves an uploaded file to the uploads directory
+// SaveUploadedFile preserves the existing API for normal packet captures.
 func (s *Storage) SaveUploadedFile(id string, reader io.Reader, fileName string) (string, error) {
-	// Create job-specific directory
+	return s.SaveUploadedFileLimited(id, reader, MaxCaptureBytes)
+}
+
+// SaveUploadedFileLimited writes at most maxBytes into a private, random-named
+// file. Untrusted multipart filenames are display metadata only and must never
+// become filesystem path components.
+func (s *Storage) SaveUploadedFileLimited(id string, reader io.Reader, maxBytes int64) (string, error) {
+	if _, err := uuid.Parse(id); err != nil {
+		return "", fmt.Errorf("invalid upload job identifier: %w", err)
+	}
+	if maxBytes <= 0 {
+		return "", fmt.Errorf("invalid upload size limit")
+	}
 	jobDir := filepath.Join(s.uploadsDir, id)
-	if err := os.MkdirAll(jobDir, 0755); err != nil {
+	if err := os.MkdirAll(jobDir, 0700); err != nil {
 		return "", fmt.Errorf("failed to create upload directory: %w", err)
 	}
-
-	// Save file
-	filePath := filepath.Join(jobDir, fileName)
-	file, err := os.Create(filePath)
+	if err := os.Chmod(jobDir, 0700); err != nil {
+		return "", fmt.Errorf("failed to secure upload directory: %w", err)
+	}
+	file, err := os.CreateTemp(jobDir, "upload-*")
 	if err != nil {
-		return "", fmt.Errorf("failed to create file: %w", err)
+		return "", fmt.Errorf("failed to create upload file: %w", err)
 	}
-	defer file.Close()
-
-	if _, err := io.Copy(file, reader); err != nil {
+	filePath := file.Name()
+	// Do not leave a partial file accessible if streaming or closing fails.
+	written, copyErr := io.Copy(file, io.LimitReader(reader, maxBytes+1))
+	closeErr := file.Close()
+	if copyErr != nil || closeErr != nil || written > maxBytes {
 		os.Remove(filePath)
-		return "", fmt.Errorf("failed to save file: %w", err)
+		switch {
+		case written > maxBytes:
+			return "", ErrUploadTooLarge
+		case copyErr != nil:
+			return "", fmt.Errorf("failed to stream upload: %w", copyErr)
+		default:
+			return "", fmt.Errorf("failed to close upload: %w", closeErr)
+		}
 	}
-
 	return filePath, nil
 }
 
@@ -387,10 +435,16 @@ func (s *Storage) GetResultsFile(id, fileType string) (string, error) {
 		if job.ResultsPath == "" {
 			return "", fmt.Errorf("JSON results not available")
 		}
+		if !isManagedFile(s.resultsDir, job.ResultsPath) {
+			return "", fmt.Errorf("refusing unmanaged JSON results path")
+		}
 		return job.ResultsPath, nil
 	case "html":
 		if job.HTMLPath == "" {
 			return "", fmt.Errorf("HTML report not available")
+		}
+		if !isManagedFile(s.resultsDir, job.HTMLPath) {
+			return "", fmt.Errorf("refusing unmanaged HTML results path")
 		}
 		return job.HTMLPath, nil
 	default:
@@ -400,11 +454,12 @@ func (s *Storage) GetResultsFile(id, fileType string) (string, error) {
 
 // GetResultsPath returns the JSON results path for a job, or empty string if not available
 func (s *Storage) GetResultsPath(id string) string {
-	job, err := s.GetJob(id)
+	// Every result-reading API must pass through the same containment check.
+	path, err := s.GetResultsFile(id, "json")
 	if err != nil {
 		return ""
 	}
-	return job.ResultsPath
+	return path
 }
 
 // ListJobs returns completed analysis jobs (simplified version for trends)
@@ -426,6 +481,7 @@ func (s *Storage) saveJob(job *AnalysisJob) error {
 		"file_name":      job.FileName,
 		"file_size":      job.FileSize,
 		"file_path":      job.FilePath,
+		"key_log_path":   job.KeyLogPath,
 		"status":         string(job.Status),
 		"progress":       job.Progress,
 		"current_step":   job.CurrentStep,
@@ -449,6 +505,7 @@ func (s *Storage) parseJobData(data map[string]string) (*AnalysisJob, error) {
 		ID:          data["id"],
 		FileName:    data["file_name"],
 		FilePath:    data["file_path"],
+		KeyLogPath:  data["key_log_path"],
 		Status:      AnalysisStatus(data["status"]),
 		CurrentStep: data["current_step"],
 		Error:       data["error"],
@@ -547,4 +604,20 @@ func (s *Storage) loadPersistedData() error {
 	}
 
 	return nil
+}
+
+// isManagedFile uses path components rather than prefix comparisons. A
+// filename like /data/results-extra must not be treated as /data/results.
+func isManagedFile(root, candidate string) bool {
+	if candidate == "" {
+		return false
+	}
+	base, baseErr := filepath.Abs(root)
+	file, fileErr := filepath.Abs(candidate)
+	if baseErr != nil || fileErr != nil {
+		return false
+	}
+	rel, err := filepath.Rel(base, file)
+	return err == nil && rel != "." && rel != ".." &&
+		!strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }

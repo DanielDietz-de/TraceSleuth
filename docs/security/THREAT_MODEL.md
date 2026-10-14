@@ -424,15 +424,21 @@ No critical heuristic diagnosis from weak evidence alone.
 - CI/security scanning foundation added;
 - changed-file repository hygiene gate added.
 
-### Known unresolved high-priority risks
+### Addressed in 0.1.1
 
-- uploaded filename/path hardening;
+- randomized private capture and keylog files with safe job IDs;
+- strict streaming multipart HTTP limits and on-disk byte limits;
+- results/deletion path containment;
+- WebSocket JWTs removed from URL query strings, now supplied as a WebSocket handshake subprotocol;
+- exact WebSocket browser Origin matching.
+
+### Known unresolved high-priority risks
 - configurable retention and storage quota;
 - global concurrent-analysis limit;
 - analysis timeout/cancellation propagation;
 - complete parser fuzzing;
 - capture-quality preflight;
-- WebSocket query-token handling;
+- WebSocket session lifetime and revocation;
 - secure headers/CSRF/CORS review;
 - supported non-loopback deployment contract;
 - full temporary-file and export review.

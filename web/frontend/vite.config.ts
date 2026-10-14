@@ -20,7 +20,9 @@ export default defineConfig({
     proxy: {
       '/api/ws': {
         target: 'http://127.0.0.1:8080',
-        changeOrigin: true,
+        // Preserve the browser Host for exact same-origin WS verification.
+        // HTTP /api requests may still rewrite Host independently.
+        changeOrigin: false,
         ws: true,
       },
       '/api': {

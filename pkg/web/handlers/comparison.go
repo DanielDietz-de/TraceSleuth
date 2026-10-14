@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,7 +11,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/gocisse/sdwan-triage/pkg/analyzer"
-	"github.com/google/uuid"
+	"github.com/gocisse/sdwan-triage/pkg/web/storage"
 )
 
 // ComparisonHandlers provides endpoints for PCAP comparison mode
@@ -35,11 +36,13 @@ func (s *simpleUploadsDir) GetUploadsDir() string { return s.dir }
 // PostCompareUpload handles the comparison of two uploaded PCAP files.
 // POST /api/compare-pcap  (multipart: file_a, file_b)
 func (h *ComparisonHandlers) PostCompareUpload(c *gin.Context) {
-	// Parse multipart form (max 200MB total)
-	if err := c.Request.ParseMultipartForm(200 << 20); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Failed to parse upload: " + err.Error()})
+	// Each capture is limited to 200 MiB; the combined request also allows
+	// an optional 8 MiB key log and bounded multipart framing overhead.
+	if err := parseUpload(c, 2*maxCompareFileBytes+storage.MaxKeyLogBytes+multipartOverhead); err != nil {
+		rejectUploadError(c, err)
 		return
 	}
+	defer c.Request.MultipartForm.RemoveAll()
 
 	// Get file A (LAN-side)
 	fileA, headerA, err := c.Request.FormFile("file_a")
@@ -73,37 +76,55 @@ func (h *ComparisonHandlers) PostCompareUpload(c *gin.Context) {
 		}
 	}
 
-	// Save both files to temp directory
-	tempDir := filepath.Join(h.store.GetUploadsDir(), "compare_"+uuid.New().String())
-	if err := os.MkdirAll(tempDir, 0755); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create temp directory"})
+	if headerA.Size > maxCompareFileBytes || headerB.Size > maxCompareFileBytes {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "Each comparison capture must be at most 200 MiB"})
 		return
 	}
-	defer os.RemoveAll(tempDir) // Clean up after comparison
-
-	pathA := filepath.Join(tempDir, "a_"+headerA.Filename)
-	pathB := filepath.Join(tempDir, "b_"+headerB.Filename)
-
-	if err := saveFile(fileA, pathA); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file_a: " + err.Error()})
-		return
-	}
-	if err := saveFile(fileB, pathB); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save file_b: " + err.Error()})
+	if headerA.Size == 0 || headerB.Size == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Comparison captures must not be empty"})
 		return
 	}
 
-	// Optional: SSL Key Log file for TLS decryption (C4)
+	// CreateTemp never interprets client-supplied path separators or names.
+	tempDir, err := os.MkdirTemp(h.store.GetUploadsDir(), "compare-*")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to prepare comparison"})
+		return
+	}
+	defer os.RemoveAll(tempDir)
+
+	pathA, err := saveComparisonFile(fileA, tempDir, "capture-a-", maxCompareFileBytes)
+	if err != nil {
+		rejectComparisonSave(c, err)
+		return
+	}
+	pathB, err := saveComparisonFile(fileB, tempDir, "capture-b-", maxCompareFileBytes)
+	if err != nil {
+		rejectComparisonSave(c, err)
+		return
+	}
+
+	// Key log content is sensitive and must remain private, temporary and bounded.
 	var keyLogPath string
 	if keyFile, keyHeader, err := c.Request.FormFile("keylog"); err == nil {
 		defer keyFile.Close()
 		keyExt := strings.ToLower(filepath.Ext(keyHeader.Filename))
-		if keyExt == ".log" || keyExt == ".txt" || keyExt == "" || keyExt == ".keys" {
-			keyPath := filepath.Join(tempDir, "sslkeylog_"+keyHeader.Filename)
-			if err := saveFile(keyFile, keyPath); err == nil {
-				keyLogPath = keyPath
-			}
+		if keyExt != ".log" && keyExt != ".txt" && keyExt != "" && keyExt != ".keys" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid key log extension"})
+			return
 		}
+		if keyHeader.Size > storage.MaxKeyLogBytes {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "Key log exceeds 8 MiB limit"})
+			return
+		}
+		keyLogPath, err = saveComparisonFile(keyFile, tempDir, "keylog-", storage.MaxKeyLogBytes)
+		if err != nil {
+			rejectComparisonSave(c, err)
+			return
+		}
+	} else if !errors.Is(err, http.ErrMissingFile) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid key log attachment"})
+		return
 	}
 
 	// Run comparison
@@ -116,8 +137,8 @@ func (h *ComparisonHandlers) PostCompareUpload(c *gin.Context) {
 	}
 
 	// Replace temp paths with original filenames in the report
-	report.FileA = headerA.Filename
-	report.FileB = headerB.Filename
+	report.FileA = displayFileName(headerA.Filename)
+	report.FileB = displayFileName(headerB.Filename)
 
 	c.JSON(http.StatusOK, report)
 }
@@ -131,12 +152,32 @@ func (h *ComparisonHandlers) PostCompareJobs(c *gin.Context) {
 	c.JSON(http.StatusNotImplemented, gin.H{"error": "Use /api/compare-pcap with direct file uploads"})
 }
 
-func saveFile(src io.Reader, dst string) error {
-	out, err := os.Create(dst)
+func saveComparisonFile(src io.Reader, directory, prefix string, limit int64) (string, error) {
+	file, err := os.CreateTemp(directory, prefix+"*")
 	if err != nil {
-		return err
+		return "", err
 	}
-	defer out.Close()
-	_, err = io.Copy(out, src)
-	return err
+	path := file.Name()
+	written, copyErr := io.Copy(file, io.LimitReader(src, limit+1))
+	closeErr := file.Close()
+	if copyErr != nil || closeErr != nil || written > limit {
+		os.Remove(path)
+		switch {
+		case written > limit:
+			return "", storage.ErrUploadTooLarge
+		case copyErr != nil:
+			return "", copyErr
+		default:
+			return "", closeErr
+		}
+	}
+	return path, nil
+}
+
+func rejectComparisonSave(c *gin.Context, err error) {
+	if errors.Is(err, storage.ErrUploadTooLarge) {
+		rejectUploadError(c, err)
+		return
+	}
+	c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store comparison upload"})
 }

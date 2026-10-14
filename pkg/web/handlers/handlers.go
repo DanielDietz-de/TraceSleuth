@@ -3,8 +3,10 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -44,12 +46,7 @@ func NewHandlers(store *storage.Storage) *Handlers {
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
-			CheckOrigin: func(r *http.Request) bool {
-				origin := r.Header.Get("Origin")
-				// Allow localhost origins only
-				return strings.HasPrefix(origin, "http://127.0.0.1") ||
-					strings.HasPrefix(origin, "http://localhost")
-			},
+			CheckOrigin:     sameOriginWebSocket,
 		},
 		integrations: &IntegrationConfig{},
 	}
@@ -125,7 +122,14 @@ var AllowedExtensions = map[string]bool{
 
 // UploadFile handles PCAP file uploads
 func (h *Handlers) UploadFile(c *gin.Context) {
-	// Get the file from the request
+	// Bound the HTTP stream before parsing multipart data. MaxMultipartMemory
+	// alone is only a RAM threshold and does NOT limit disk-backed uploads.
+	if err := parseUpload(c, storage.MaxCaptureBytes+storage.MaxKeyLogBytes+multipartOverhead); err != nil {
+		rejectUploadError(c, err)
+		return
+	}
+	defer c.Request.MultipartForm.RemoveAll()
+
 	file, header, err := c.Request.FormFile("file")
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{
@@ -147,33 +151,70 @@ func (h *Handlers) UploadFile(c *gin.Context) {
 	}
 
 	// Validate file size (500MB max)
-	const maxSize = 500 << 20
-	if header.Size > maxSize {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error":   "File too large",
-			"details": fmt.Sprintf("Maximum file size is 500MB. Got: %d MB", header.Size/1024/1024),
-		})
+	if header.Size > storage.MaxCaptureBytes {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "Capture exceeds 500 MiB limit"})
 		return
+	}
+	if header.Size == 0 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Capture is empty"})
+		return
+	}
+
+	// Validate optional TLS key log before committing the analysis job.
+	keyFile, keyHeader, keyErr := c.Request.FormFile("keylog")
+	if keyErr != nil && !errors.Is(keyErr, http.ErrMissingFile) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid key log attachment"})
+		return
+	}
+	if keyErr == nil {
+		defer keyFile.Close()
+		keyExt := strings.ToLower(filepath.Ext(keyHeader.Filename))
+		if keyExt != ".log" && keyExt != ".txt" && keyExt != "" && keyExt != ".keys" {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid key log extension"})
+			return
+		}
+		if keyHeader.Size > storage.MaxKeyLogBytes {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "Key log exceeds 8 MiB limit"})
+			return
+		}
 	}
 
 	// Generate unique ID for this analysis
 	id := uuid.New().String()
 
 	// Save the file
-	filePath, err := h.store.SaveUploadedFile(id, file, header.Filename)
+	filePath, err := h.store.SaveUploadedFileLimited(id, file, storage.MaxCaptureBytes)
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{
-			"error":   "Failed to save file",
-			"details": err.Error(),
-		})
+		if errors.Is(err, storage.ErrUploadTooLarge) {
+			rejectUploadError(c, err)
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store capture"})
+		}
 		return
 	}
 
-	// Create job record
-	job, err := h.store.CreateJob(id, header.Filename, header.Size, filePath)
+	var keyPath string
+	if keyErr == nil {
+		keyPath, err = h.store.SaveUploadedFileLimited(id, keyFile, storage.MaxKeyLogBytes)
+		if err != nil {
+			os.Remove(filePath)
+			if errors.Is(err, storage.ErrUploadTooLarge) {
+				rejectUploadError(c, err)
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to store key log"})
+			}
+			return
+		}
+	}
+
+	// Keep the original filename only as safe, human-readable metadata.
+	job, err := h.store.CreateJob(id, displayFileName(header.Filename), header.Size, filePath)
 	if err != nil {
 		// Clean up file on failure
 		os.Remove(filePath)
+		if keyPath != "" {
+			os.Remove(keyPath)
+		}
 		c.JSON(http.StatusInternalServerError, gin.H{
 			"error":   "Failed to create analysis job",
 			"details": err.Error(),
@@ -181,17 +222,13 @@ func (h *Handlers) UploadFile(c *gin.Context) {
 		return
 	}
 
-	// Optional: SSL Key Log file for TLS decryption (C4)
-	if keyFile, keyHeader, err := c.Request.FormFile("keylog"); err == nil {
-		defer keyFile.Close()
-		keyExt := strings.ToLower(filepath.Ext(keyHeader.Filename))
-		// Accept .log, .txt, or no-extension key log files
-		if keyExt == ".log" || keyExt == ".txt" || keyExt == "" || keyExt == ".keys" {
-			keyPath, err := h.store.SaveUploadedFile(id, keyFile, "sslkeylog_"+keyHeader.Filename)
-			if err == nil {
-				job.KeyLogPath = keyPath
-				h.store.UpdateJob(job)
-			}
+	if keyPath != "" {
+		job.KeyLogPath = keyPath
+		if err := h.store.UpdateJob(job); err != nil {
+			os.Remove(keyPath)
+			h.store.DeleteJob(id)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save key log metadata"})
+			return
 		}
 	}
 
@@ -346,7 +383,7 @@ func (h *Handlers) DownloadJSON(c *gin.Context) {
 	job, _ := h.store.GetJob(id)
 	fileName := strings.TrimSuffix(job.FileName, filepath.Ext(job.FileName)) + "_results.json"
 
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fileName))
+	c.Header("Content-Disposition", attachmentName(fileName))
 	c.File(resultsPath)
 }
 
@@ -365,7 +402,7 @@ func (h *Handlers) DownloadHTML(c *gin.Context) {
 	job, _ := h.store.GetJob(id)
 	fileName := strings.TrimSuffix(job.FileName, filepath.Ext(job.FileName)) + "_report.html"
 
-	c.Header("Content-Disposition", fmt.Sprintf("attachment; filename=%s", fileName))
+	c.Header("Content-Disposition", attachmentName(fileName))
 	c.File(htmlPath)
 }
 
@@ -541,4 +578,14 @@ func formatFileSize(size int64) string {
 // runPCAPAnalysis integrates with the existing analysis engine
 func runPCAPAnalysis(store *storage.Storage, job *storage.AnalysisJob, integrations *IntegrationConfig) (string, string, error) {
 	return AnalyzePCAP(store, job, integrations)
+}
+
+// sameOriginWebSocket rejects attacker-controlled prefix-matching origins.
+func sameOriginWebSocket(r *http.Request) bool {
+	origin, err := url.Parse(r.Header.Get("Origin"))
+	if err != nil || (origin.Scheme != "http" && origin.Scheme != "https") ||
+		origin.User != nil || origin.Path != "" || origin.RawQuery != "" || origin.Fragment != "" {
+		return false
+	}
+	return origin.Host != "" && strings.EqualFold(origin.Host, r.Host)
 }

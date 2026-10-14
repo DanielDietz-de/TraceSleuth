@@ -16,6 +16,48 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
 - Generalized multi-capture correlation.
 - Retention, storage quotas, analysis resource limits, and comprehensive self-hosting hardening.
 
+## [0.1.1] - 2026-10-14
+
+### Review-driven hardening
+
+- Remove disk-backed multipart temporary files even on parsing failures.
+- Route every results accessor through the same containment validation.
+- Align Vite development WebSocket proxy with strict browser same-origin checks,
+  and restore polling fallback after a failed initial WebSocket connection.
+- Restrict progress WebSocket identifiers to server-issued UUIDs and use a
+  same-origin relative endpoint in the browser.
+- Disable the unauthenticated, duplicated historical web/backend executable.
+  The legacy web/build.sh script now invokes the canonical authenticated build.
+
+
+
+### Security
+
+- Enforce per-request multipart byte ceilings before parsing, plus independent
+  stream-copy limits for captures (500 MiB), comparison captures (200 MiB each)
+  and optional TLS key logs (8 MiB).
+- Replace user-controlled upload path components with UUID-isolated, random,
+  private internal filenames; clean incomplete uploads.
+- Restrict sensitive local data directories to owner access and prevent
+  unmanaged result paths from being read or removed through persisted jobs.
+- Remove JWT authentication through URL query parameters and migrate browser
+  WebSockets to a dedicated handshake subprotocol; enforce exact-origin checks.
+- Persist and delete TLS key-log files correctly; sanitize display/download
+  filenames to prevent header injection.
+- Raise the minimum Go toolchain to supported Go 1.26.9 (October 2026
+  security release); update x/net to 0.60.0 and Gorilla WebSocket to 1.5.3,
+  with the necessary x/crypto, x/sys and x/text dependency changes.
+- Add focused Go regression tests for upload limits, traversal prevention,
+  storage containment, WebSocket origin/token handling and key-log lifecycle.
+
+### Compatibility
+
+- The backend and frontend must be upgraded together: pre-0.1.1 browsers
+  still send WebSocket query tokens, which the hardened backend rejects.
+- The application remains loopback-only by default and is **not yet
+  production-ready**; resource budgets, retention, capture preflight, and
+  parser fuzzing remain outstanding.
+
 ## [0.1.0] - 2026-07-09
 
 ### Added

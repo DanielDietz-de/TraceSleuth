@@ -116,7 +116,7 @@ func runWebServer(port int, noBrowser bool, intOpts *IntegrationOptions) {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	router.MaxMultipartMemory = maxUploadSize
+	router.MaxMultipartMemory = 16 << 20 // memory threshold, independent of HTTP body limits
 
 	// ── API Rate Limiting ──────────────────────────────────────
 	router.Use(middleware.RateLimitMiddleware(middleware.RateLimitConfig{

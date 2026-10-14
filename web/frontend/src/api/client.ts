@@ -374,6 +374,12 @@ export async function changePassword(currentPassword: string, newPassword: strin
   });
 }
 
+// Job identifiers are canonical UUIDs created server-side. Enforce a narrow
+// route-segment grammar before including identifiers in a WebSocket URL.
+export function isValidProgressJobId(id: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+}
+
 // WebSocket connection for real-time progress
 export function createProgressWebSocket(
   id: string,
@@ -381,11 +387,14 @@ export function createProgressWebSocket(
   onError: (error: Error) => void,
   onClose: () => void
 ): WebSocket {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = window.location.host;
+  if (!isValidProgressJobId(id)) {
+    throw new Error('Invalid analysis job identifier');
+  }
   const token = getAuthToken();
-  const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-  const ws = new WebSocket(`${protocol}//${host}/api/ws/${id}${tokenParam}`);
+  // Relative URL resolves against the current application origin; only a
+  // canonical server-issued UUID may be substituted as a path segment.
+  const route = '/api/ws/' + encodeURIComponent(id);
+  const ws = new WebSocket(route, token ? ['tracesleuth.jwt.' + token] : []);
 
   ws.onmessage = (event) => {
     try {

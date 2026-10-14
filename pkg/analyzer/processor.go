@@ -200,6 +200,7 @@ func (p *Processor) logWarning(format string, args ...interface{}) {
 // and pcapgo.NgReader do).
 func (p *Processor) Process(reader PacketReader, state *models.AnalysisState, report *models.TriageReport, filter *models.Filter) error {
 	packetCount := 0
+	consecutiveReadErrors := 0
 	startTime := time.Now()
 
 	for {
@@ -208,15 +209,21 @@ func (p *Processor) Process(reader PacketReader, state *models.AnalysisState, re
 			break
 		}
 		if err != nil {
-			// Don't fail on individual packet read errors, log and continue
+			// Isolated read errors may be recoverable, but indefinitely
+			// retrying an unrecoverable parser error is a CPU denial of service.
+			consecutiveReadErrors++
 			p.errorCount++
 			if p.errorCount <= 5 {
 				p.logWarning("Error reading packet %d: %v", packetCount+1, err)
 			} else if p.errorCount == 6 {
 				p.logWarning("Suppressing further packet read errors...")
 			}
+			if consecutiveReadErrors >= 5 {
+				return fmt.Errorf("aborting after five consecutive packet record errors: %w", err)
+			}
 			continue
 		}
+		consecutiveReadErrors = 0
 
 		// Early filter check: Apply filter before packet creation for performance
 		// This avoids expensive packet parsing for filtered packets
@@ -990,8 +997,7 @@ func (p *Processor) finalizeTunnelAnalysis(report *models.TriageReport) {
 			DstIP:       tunnel.DstIP,
 			SrcPort:     tunnel.SrcPort,
 			DstPort:     tunnel.DstPort,
-			Identifier:  tunnel.VNI,
-			InnerProto:  tunnel.InnerProto,
+			Identifier:  tunnel.VNI,			InnerProto:  tunnel.InnerProto,
 			PacketCount: tunnel.PacketCount,
 			ByteCount:   tunnel.ByteCount,
 			FirstSeen:   float64(tunnel.FirstSeen.UnixNano()) / 1e9,

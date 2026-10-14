@@ -21,7 +21,10 @@ func TestWebSocketBearerTokenNotFromURL(t *testing.T) {
 }
 
 func TestWebSocketOriginRejectsCrossSiteAndPrefixImpersonation(t *testing.T) {
-	for _, test := range []struct{origin string; pass bool}{
+	for _, test := range []struct {
+		origin string
+		pass   bool
+	}{
 		{"http://localhost:8080", true},
 		{"http://localhost.attacker.test:8080", false},
 		{"http://localhost:8080.attacker.test", false},

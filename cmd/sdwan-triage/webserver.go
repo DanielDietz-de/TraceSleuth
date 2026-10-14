@@ -105,7 +105,7 @@ func runWebServer(port int, noBrowser bool, intOpts *IntegrationOptions) {
 
 	// CORS — allow any localhost origin for development
 	router.Use(cors.New(cors.Config{
-		AllowOriginFunc: middleware.AllowLoopbackCORS,
+		AllowOriginFunc:  middleware.AllowLoopbackCORS,
 		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
 		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "Content-Length", "X-Requested-With"},
 		ExposeHeaders:    []string{"Content-Length", "Content-Disposition", "Content-Type"},

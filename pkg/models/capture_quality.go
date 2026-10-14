@@ -6,25 +6,25 @@ import "time"
 // capture before network fault detectors run. Counts and timestamps are
 // observations; limitations are not diagnoses of the live network.
 type CaptureQuality struct {
-	SHA256                   string                `json:"sha256"`
-	Format                   string                `json:"format"`
-	FileSizeBytes            int64                 `json:"file_size_bytes"`
-	PacketCount              uint64                `json:"packet_count"`
-	CapturedBytes            uint64                `json:"captured_bytes"`
-	OriginalBytes            uint64                `json:"original_bytes"`
-	TruncatedPackets         uint64                `json:"truncated_packets"`
-	TruncationRate           float64               `json:"truncation_rate"`
-	NonMonotonicTimestamps   uint64                `json:"non_monotonic_timestamps"`
-	MissingTimestamps        uint64                `json:"missing_timestamps"`
-	LargeTimestampGaps       uint64                `json:"large_timestamp_gaps"`
-	FirstTimestamp           *time.Time            `json:"first_timestamp,omitempty"`
-	LastTimestamp            *time.Time            `json:"last_timestamp,omitempty"`
-	DurationSeconds          float64               `json:"duration_seconds"`
-	Interfaces               []CaptureInterface    `json:"interfaces"`
-	LinkTypes                []string              `json:"link_types"`
-	Capabilities             []string              `json:"capabilities"`
-	Limitations              []CaptureQualityIssue `json:"limitations"`
-	Status                   string                `json:"status"` // good or degraded; malformed captures fail preflight
+	SHA256                 string                `json:"sha256"`
+	Format                 string                `json:"format"`
+	FileSizeBytes          int64                 `json:"file_size_bytes"`
+	PacketCount            uint64                `json:"packet_count"`
+	CapturedBytes          uint64                `json:"captured_bytes"`
+	OriginalBytes          uint64                `json:"original_bytes"`
+	TruncatedPackets       uint64                `json:"truncated_packets"`
+	TruncationRate         float64               `json:"truncation_rate"`
+	NonMonotonicTimestamps uint64                `json:"non_monotonic_timestamps"`
+	MissingTimestamps      uint64                `json:"missing_timestamps"`
+	LargeTimestampGaps     uint64                `json:"large_timestamp_gaps"`
+	FirstTimestamp         *time.Time            `json:"first_timestamp,omitempty"`
+	LastTimestamp          *time.Time            `json:"last_timestamp,omitempty"`
+	DurationSeconds        float64               `json:"duration_seconds"`
+	Interfaces             []CaptureInterface    `json:"interfaces"`
+	LinkTypes              []string              `json:"link_types"`
+	Capabilities           []string              `json:"capabilities"`
+	Limitations            []CaptureQualityIssue `json:"limitations"`
+	Status                 string                `json:"status"` // good or degraded; malformed captures fail preflight
 }
 
 type CaptureInterface struct {

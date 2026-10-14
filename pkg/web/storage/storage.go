@@ -99,6 +99,11 @@ func NewStorage() (*Storage, error) {
 			mini.Close()
 			return nil, fmt.Errorf("failed to create directory %s: %w", dir, err)
 		}
+		// Repair insecure permissions left by older installations.
+		if err := os.Chmod(dir, 0700); err != nil {
+			mini.Close()
+			return nil, fmt.Errorf("failed to secure directory %s: %w", dir, err)
+		}
 	}
 
 	s := &Storage{
@@ -304,15 +309,21 @@ func (s *Storage) DeleteJob(id string) error {
 		return err
 	}
 
-	// Delete files
-	if job.FilePath != "" {
-		os.Remove(job.FilePath)
+	// Delete only the UUID-scoped directories managed by this instance,
+	// never arbitrary paths loaded from a job record. This also removes
+	// optional TLS key logs and generated sidecar files.
+	if _, err := uuid.Parse(id); err != nil {
+		return fmt.Errorf("invalid job ID: %w", err)
 	}
-	if job.ResultsPath != "" {
-		os.Remove(job.ResultsPath)
+	if job.Status == StatusAnalyzing {
+		return fmt.Errorf("cannot delete a running analysis")
 	}
-	if job.HTMLPath != "" {
-		os.Remove(job.HTMLPath)
+	for _, dir := range []string{
+		filepath.Join(s.uploadsDir, id), filepath.Join(s.resultsDir, id),
+	} {
+		if err := os.RemoveAll(dir); err != nil {
+			return fmt.Errorf("remove job files: %w", err)
+		}
 	}
 
 	// Delete from Redis

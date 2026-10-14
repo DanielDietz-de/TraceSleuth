@@ -40,14 +40,14 @@ func InspectCapture(path string) (*models.CaptureQuality, error) {
 	defer cap.Close()
 
 	q := &models.CaptureQuality{
-		SHA256: hex.EncodeToString(hash.Sum(nil)),
-		Format: string(cap.Format),
+		SHA256:        hex.EncodeToString(hash.Sum(nil)),
+		Format:        string(cap.Format),
 		FileSizeBytes: size,
-		Status: "good",
-		Interfaces: make([]models.CaptureInterface, 0, 1),
-		LinkTypes: make([]string, 0, 1),
-		Capabilities: make([]string, 0, 4),
-		Limitations: make([]models.CaptureQualityIssue, 0),
+		Status:        "good",
+		Interfaces:    make([]models.CaptureInterface, 0, 1),
+		LinkTypes:     make([]string, 0, 1),
+		Capabilities:  make([]string, 0, 4),
+		Limitations:   make([]models.CaptureQualityIssue, 0),
 	}
 	linkTypeSet := map[string]bool{}
 	interfacePackets := map[int]uint64{}
@@ -133,9 +133,9 @@ func InspectCapture(path string) (*models.CaptureQuality, error) {
 			}
 			info := models.CaptureInterface{
 				Index: i, Name: iface.Name, LinkType: iface.LinkType.String(),
-				SnapLength: iface.SnapLength,
+				SnapLength:          iface.SnapLength,
 				TimestampResolution: fmt.Sprint(iface.Resolution()),
-				PacketCount: interfacePackets[i],
+				PacketCount:         interfacePackets[i],
 			}
 			if iface.Statistics.PacketsDropped != pcapgo.NgNoValue64 {
 				drops := iface.Statistics.PacketsDropped

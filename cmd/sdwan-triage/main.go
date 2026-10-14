@@ -414,7 +414,7 @@ For more information and documentation:
 
 	// Initialize report and state
 	report := &models.TriageReport{
-		CaptureQuality: quality,
+		CaptureQuality:       quality,
 		ApplicationBreakdown: make(map[string]models.AppCategory),
 	}
 	state := models.NewAnalysisState()
@@ -997,8 +997,7 @@ func checkConnectivity(ip string, verbose bool) error {
 }
 
 // bgpPrefixResponse represents the RIPE stat API response for prefix overview
-type bgpPrefixResponse struct {
-	Status     string `json:"status"`
+type bgpPrefixResponse struct {	Status     string `json:"status"`
 	StatusCode int    `json:"status_code"`
 	Data       struct {
 		Resource string `json:"resource"`

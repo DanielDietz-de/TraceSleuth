@@ -298,6 +298,11 @@ For more information and documentation:
 
 	flag.Parse()
 
+	if *jsonOutput && (*webMode || *showHelp) {
+		fmt.Fprintln(os.Stderr, "Error: -json is not compatible with -web or -help")
+		os.Exit(2)
+	}
+
 	// Web application mode — start server and return
 	if *webMode {
 		intOpts := &IntegrationOptions{
@@ -316,6 +321,26 @@ For more information and documentation:
 			os.Exit(0)
 		}
 		os.Exit(1)
+	}
+
+	// A machine-readable invocation must emit exactly one JSON document.
+	// Reject incompatible human-report/export flags rather than quietly
+	// contaminating stdout after the primary JSON result.
+	if *jsonOutput && (*csvOutput != "" || *htmlOutput != "" || *multiPageHTML != "" ||
+		*pdfOutput != "" || *simpleOutput || *tracePath || *bgpCheck ||
+		*appIdentify || *debugHTML) {
+		fmt.Fprintln(os.Stderr, "Error: -json cannot be combined with additional output, trace-path, BGP, app-identify, or debug-html options")
+		os.Exit(2)
+	}
+	// Comparison is a separate analysis mode, not an extra operation appended
+	// after the first capture report. Return exactly one comparison document.
+	if *compareMode {
+		if flag.NArg() != 2 {
+			fmt.Fprintln(os.Stderr, "Error: -compare requires exactly two capture files")
+			os.Exit(2)
+		}
+		runPCAPComparison(flag.Arg(0), flag.Arg(1), *verbose, *jsonOutput, "")
+		return
 	}
 
 	// Create filter
@@ -390,18 +415,9 @@ For more information and documentation:
 	}
 
 	// Capture trust/observability must be inspected before fault diagnosis.
-	quality, err := analyzer.InspectCapture(absPath)
+	quality, capHandle, err := analyzer.InspectCaptureAndOpen(absPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Capture quality preflight failed: %v\n", err)
-		os.Exit(1)
-	}
-	capHandle, err := analyzer.OpenCapture(absPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to read capture file '%s'\n", filepath.Base(absPath))
-		fmt.Fprintf(os.Stderr, "       Supported formats: .pcap and .pcapng\n")
-		if *verbose {
-			fmt.Fprintf(os.Stderr, "[DEBUG] OpenCapture error: %v\n", err)
-		}
 		os.Exit(1)
 	}
 	defer capHandle.Close()
@@ -449,6 +465,10 @@ For more information and documentation:
 
 	if err := processor.Process(reader, state, report, filter); err != nil {
 		fmt.Fprintf(os.Stderr, "Error processing PCAP: %v\n", err)
+		os.Exit(1)
+	}
+	if err := analyzer.VerifyCaptureHandle(capHandle, quality); err != nil {
+		fmt.Fprintf(os.Stderr, "Capture identity check failed after analysis: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -584,43 +604,32 @@ For more information and documentation:
 		enhanceApplicationIdentification(report, *verbose)
 	}
 
-	// Compare mode - handled separately with multiple files
-	if *compareMode {
-		if flag.NArg() < 2 {
-			color.Yellow("⚠ Compare mode requires 2 PCAP files (LAN-side and WAN-side)")
-			color.Yellow("  Usage: sdwan-triage -compare lan.pcap wan.pcap")
-		} else {
-			color.Cyan("\n━━━ PCAP COMPARISON MODE ━━━")
-			runPCAPComparison(flag.Arg(0), flag.Arg(1), *verbose, *jsonOutput, *htmlOutput)
-		}
-	}
 }
 
 // runPCAPComparison performs a deep packet-level comparison between two PCAP files.
 func runPCAPComparison(fileA, fileB string, verboseMode bool, jsonOut bool, htmlFile string) {
 	comp := analyzer.NewComparator(verboseMode)
 
-	color.White("  LAN-side (A): %s", fileA)
-	color.White("  WAN-side (B): %s", fileB)
-	fmt.Println()
-
+	if !jsonOut {
+		color.White("  LAN-side (A): %s", fileA)
+		color.White("  WAN-side (B): %s", fileB)
+		fmt.Println()
+	}
 	report, err := comp.Compare(fileA, fileB)
 	if err != nil {
-		color.Red("  ✗ Comparison failed: %v", err)
+		fmt.Fprintf(os.Stderr, "Comparison failed: %v\n", err)
 		os.Exit(1)
 	}
-
-	// Print results
-	printComparisonReport(report)
-
-	// JSON output
 	if jsonOut {
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
 		if err := encoder.Encode(report); err != nil {
 			fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
+			os.Exit(1)
 		}
+		return
 	}
+	printComparisonReport(report)
 }
 
 // printComparisonReport displays the comparison results in the terminal.

@@ -138,6 +138,19 @@ link types, per-interface metadata where available, truncation, reported
 capture drops and timestamp anomalies. The results UI displays this
 information separately from actual network findings.
 
+The preflight and detector pass share one open capture descriptor, with
+SHA-256 identity reverified after detection; a file modified in place fails
+rather than yielding findings tied to a stale capture hash. PCAPNG interface
+statistics and packet counts are preserved separately per section. Interface
+capture filters are retained in the JSON/UI and explicitly reduce asserted
+STP/LACP observability; observing Ethernet alone does not prove those control
+protocols were available through an active filter.
+
+CLI JSON output is exclusively machine-readable: both the single-capture
+analysis and the two-capture comparison emit one JSON document. Conflicting
+options that generate human-readable reports or a second export are rejected
+with an error on stderr. The CI/release smoke test verifies this contract.
+
 A degraded capture status describes limitations of the capture **only**;
 it is not proof that the live network has a fault. Empty and structurally
 truncated captures fail preflight rather than producing misleading findings.

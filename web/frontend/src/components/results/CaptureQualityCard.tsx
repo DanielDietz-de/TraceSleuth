@@ -32,6 +32,19 @@ export function CaptureQualityCard({ quality }: CaptureQualityCardProps) {
         Observed link types: {quality.link_types.length ? quality.link_types.join(', ') : 'unknown'}
         {' '} &bull; SHA-256: <code>{quality.sha256.slice(0, 16)}…</code>
       </p>
+      {(quality.interfaces ?? []).some(iface => Boolean(iface.filter)) && (
+        <div className="mt-3 text-xs text-amber-200" aria-label="Capture filters">
+          <p className="font-semibold">Capture filters restrict protocol visibility:</p>
+          <ul className="mt-1 space-y-1">
+            {(quality.interfaces ?? []).filter(iface => iface.filter).map(iface => (
+              <li key={String(iface.section_index) + '-' + String(iface.index)}>
+                Section {iface.section_index}, interface {iface.name || iface.index}:
+                {' '}<code>{iface.filter}</code>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {limitations.length > 0 && (
         <ul className="mt-3 space-y-1 text-sm text-amber-200">
           {limitations.map(issue => (

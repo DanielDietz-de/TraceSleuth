@@ -539,11 +539,12 @@ func (h *Handlers) WebSocketHandler(c *gin.Context) {
 
 // runAnalysis performs the actual PCAP analysis
 func (h *Handlers) runAnalysis(job *storage.AnalysisJob) {
-	// Update status to analyzing
-	job.Status = storage.StatusAnalyzing
-	job.Progress = 0
-	job.CurrentStep = "Initializing analysis..."
-	h.store.UpdateJob(job)
+	// Set status through the same cancellation-safe transition as the
+	// periodic progress updater. A delayed goroutine must not revive a
+	// previously cancelled capture.
+	if err := h.store.UpdateProgress(job.ID, 0, "Initializing analysis...", 0); err != nil {
+		return
+	}
 
 	// Import and use the existing analyzer
 	resultsPath, htmlPath, err := h.performAnalysis(job)

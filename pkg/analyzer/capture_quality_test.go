@@ -179,3 +179,130 @@ func TestInspectCaptureRejectsTruncatedPCAPNG(t *testing.T) {
 		t.Fatal("truncated pcapng unexpectedly accepted")
 	}
 }
+
+func TestInspectCaptureRetainsPCAPNGSections(t *testing.T) {
+	var buf bytes.Buffer
+	t0 := time.Unix(1000, 0).UTC()
+	packet := make([]byte, 60)
+	for section, name := range []string{"first-site", "second-site"} {
+		writer, err := pcapgo.NewNgWriterInterface(&buf, pcapgo.NgInterface{
+			Name: name, LinkType: layers.LinkTypeEthernet,
+		}, pcapgo.DefaultNgWriterOptions)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for i := 0; i < section+1; i++ {
+			ci := gopacket.CaptureInfo{
+				Timestamp:     t0.Add(time.Duration(section*10+i) * time.Second),
+				CaptureLength: len(packet), Length: len(packet),
+			}
+			if err := writer.WritePacket(ci, packet); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := writer.Flush(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	path := filepath.Join(t.TempDir(), "two-sections.pcapng")
+	if err := os.WriteFile(path, buf.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := InspectCapture(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.PacketCount != 3 || len(result.Interfaces) != 2 {
+		t.Fatalf("lost interface metadata across sections: %+v", result)
+	}
+	if result.Interfaces[0].SectionIndex != 0 || result.Interfaces[0].Name != "first-site" ||
+		result.Interfaces[0].PacketCount != 1 {
+		t.Errorf("first section misattributed: %+v", result.Interfaces[0])
+	}
+	if result.Interfaces[1].SectionIndex != 1 || result.Interfaces[1].Name != "second-site" ||
+		result.Interfaces[1].PacketCount != 2 {
+		t.Errorf("second section misattributed: %+v", result.Interfaces[1])
+	}
+}
+
+func TestInspectCaptureHonorsPCAPNGCaptureFilter(t *testing.T) {
+	var buf bytes.Buffer
+	writer, err := pcapgo.NewNgWriterInterface(&buf, pcapgo.NgInterface{
+		Name: "filtered-uplink", LinkType: layers.LinkTypeEthernet,
+		Filter: "tcp port 443",
+	}, pcapgo.DefaultNgWriterOptions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	p := make([]byte, 60)
+	if err := writer.WritePacket(gopacket.CaptureInfo{
+		Timestamp: time.Unix(1000, 0), CaptureLength: len(p), Length: len(p),
+	}, p); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "filtered.pcapng")
+	if err := os.WriteFile(path, buf.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	result, err := InspectCapture(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Interfaces) != 1 || result.Interfaces[0].Filter != "tcp port 443" {
+		t.Fatalf("capture filter lost: %+v", result.Interfaces)
+	}
+	if result.Status != "degraded" {
+		t.Errorf("filtered capture marked good: %+v", result)
+	}
+	for _, cap := range result.Capabilities {
+		if cap == "stp_bpdu" || cap == "lacp_slow_protocols" {
+			t.Errorf("asserted control-plane visibility with a capture filter: %q", cap)
+		}
+	}
+	found := false
+	for _, issue := range result.Limitations {
+		if issue.Code == "interface_capture_filter" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("missing filter limitation: %+v", result.Limitations)
+	}
+}
+
+func TestPreflightAndAnalysisShareDescriptorAndDetectModification(t *testing.T) {
+	t0 := time.Unix(1000, 0).UTC()
+	path, _ := makeQualityFixture(t, false, []gopacket.CaptureInfo{{
+		Timestamp: t0, CaptureLength: 60, Length: 60,
+	}})
+	quality, handle, err := InspectCaptureAndOpen(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handle.Close()
+	// Atomic path replacement must not switch the bytes consumed by the
+	// analyzer: the handle is bound to the original opened inode.
+	moved := path + ".original"
+	if err := os.Rename(path, moved); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("different file at the original name"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := handle.Reader.ReadPacketData(); err != nil {
+		t.Fatalf("reader incorrectly followed replacement path: %v", err)
+	}
+	if err := VerifyCaptureHandle(handle, quality); err != nil {
+		t.Fatalf("same opened inode unexpectedly changed: %v", err)
+	}
+	// Replacing the contents of that inode must invalidate the analysis.
+	if err := os.WriteFile(moved, []byte("modified in place"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyCaptureHandle(handle, quality); err == nil {
+		t.Fatal("accepted a capture whose opened descriptor changed after preflight")
+	}
+}

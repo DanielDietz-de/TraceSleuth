@@ -71,7 +71,20 @@ export interface CaptureQualityIssue {
   description: string;
 }
 
+export interface CaptureInterfaceSummary {
+  section_index: number;
+  index: number;
+  name?: string;
+  link_type: string;
+  filter?: string;
+  snap_length: number;
+  timestamp_resolution?: string;
+  packet_count: number;
+  reported_drops?: number;
+}
+
 export interface CaptureQualitySummary {
+  interfaces?: CaptureInterfaceSummary[];
   sha256: string;
   format: 'pcap' | 'pcapng';
   file_size_bytes: number;

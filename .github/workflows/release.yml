@@ -108,6 +108,9 @@ jobs:
           go build -trimpath -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-linux-amd64 ./cmd/sdwan-triage
           tar -czf build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-linux-amd64.tar.gz -C build ${{ env.BINARY_NAME }}-linux-amd64
 
+      - name: Verify Linux CLI machine-readable output
+        run: bash scripts/test-cli-json.sh build/${{ env.BINARY_NAME }}-linux-amd64
+
       - name: Build macOS amd64
         env:
           CGO_ENABLED: 0

@@ -32,6 +32,21 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
 - Add synthetic PCAP/PCAPNG positive/negative tests, malformed-input tests,
   result integration assertions and UI regression tests.
 
+### Review hardening
+
+- Pin preflight and detector processing to one open capture descriptor,
+  verifying the SHA-256 identity before and after packet analysis to reject
+  captures modified in place or replaced between passes.
+- Preserve per-section PCAPNG interfaces and packet counts instead of
+  incorrectly assigning earlier sections to the final section's interfaces.
+- Record interface capture filters, surface them in the UI, and suppress
+  unsupported STP/LACP visibility claims for filtered captures.
+- Prevent cancellation during the preflight scan from being overwritten by
+  late progress or result updates; add concurrent cancellation regression tests.
+- Keep single-capture and comparison JSON-mode output parseable as exactly
+  one document and reject conflicting export flags, with an executable
+  smoke gate in both CI and the release workflow.
+
 ### Remaining limitations
 
 - This is an **initial Phase 2 checkpoint**, not completed capture trust:

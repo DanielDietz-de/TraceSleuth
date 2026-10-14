@@ -53,50 +53,50 @@ func (h *CaptureHandle) Close() error {
 	return nil
 }
 
-// OpenCapture opens a packet capture file, auto-detects the format
-// (pcap vs pcapng) via magic bytes, and returns the appropriate reader.
-//
-// The caller owns the CaptureHandle and must call h.Close() when done.
+// OpenCapture opens a packet capture file, auto-detects PCAP or PCAPNG,
+// and returns a reader on an owned file descriptor.
 func OpenCapture(filePath string) (*CaptureHandle, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open capture file: %w", err)
 	}
-
-	format, err := detectFormat(f)
+	h, err := openCaptureOnFile(f, pcapgo.NgReaderOptions{WantMixedLinkType: true})
 	if err != nil {
 		f.Close()
 		return nil, err
 	}
+	return h, nil
+}
 
-	// Seek back to start so the reader sees the full file.
+// openCaptureOnFile resets a descriptor and recreates the packet reader.
+// This is used between preflight and detection so both passes use the SAME
+// open descriptor even when the original pathname is renamed/replaced.
+func openCaptureOnFile(f *os.File, options pcapgo.NgReaderOptions) (*CaptureHandle, error) {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("failed to seek: %w", err)
+		return nil, fmt.Errorf("failed to seek capture: %w", err)
 	}
-
+	format, err := detectFormat(f)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("failed to rewind capture: %w", err)
+	}
 	handle := &CaptureHandle{File: f, Format: format}
-
-	switch format {
-	case FormatPCAPNG:
-		ngReader, err := pcapgo.NewNgReader(f, pcapgo.NgReaderOptions{
-			WantMixedLinkType: true,
-		})
+	if format == FormatPCAPNG {
+		options.WantMixedLinkType = true
+		reader, err := pcapgo.NewNgReader(f, options)
 		if err != nil {
-			f.Close()
 			return nil, fmt.Errorf("failed to create pcapng reader: %w", err)
 		}
-		handle.Reader = ngReader
-
-	default: // FormatPCAP
-		pcapReader, err := pcapgo.NewReader(f)
+		handle.Reader = reader
+	} else {
+		reader, err := pcapgo.NewReader(f)
 		if err != nil {
-			f.Close()
 			return nil, fmt.Errorf("failed to create pcap reader: %w", err)
 		}
-		handle.Reader = pcapReader
+		handle.Reader = reader
 	}
-
 	return handle, nil
 }
 

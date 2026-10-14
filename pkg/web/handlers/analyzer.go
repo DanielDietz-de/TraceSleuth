@@ -43,25 +43,22 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 	log.Printf("[ANALYSIS] Starting analysis for job: %s, file: %s", job.ID, job.FileName)
 
 	// Capture validity/observability is established before fault detectors.
-	store.UpdateProgress(job.ID, 5, "Validating capture integrity...", 60)
-	quality, err := analyzer.InspectCapture(job.FilePath)
+	if err := store.UpdateProgress(job.ID, 5, "Validating capture integrity...", 60); err != nil {
+		return "", "", err
+	}
+	quality, capHandle, err := analyzer.InspectCaptureAndOpen(job.FilePath)
 	if err != nil {
 		return "", "", fmt.Errorf("capture quality preflight failed: %w", err)
-	}
-
-	// Open capture file (auto-detects pcap vs pcapng)
-	capHandle, err := analyzer.OpenCapture(job.FilePath)
-	if err != nil {
-		log.Printf("[ANALYSIS] Failed to open capture file: %v", err)
-		return "", "", fmt.Errorf("failed to open capture file: %w", err)
 	}
 	defer capHandle.Close()
 	reader := capHandle.Reader
 
-	log.Printf("[ANALYSIS] Capture file opened (format: %s): %s", capHandle.Format, job.FilePath)
-
-	// Update progress: Analyzing
-	store.UpdateProgress(job.ID, 10, "Analyzing packets...", 50)
+	// Cancellation may arrive during the hash/packet preflight. Never
+	// overwrite the terminal cancelled state after returning from preflight.
+	if err := store.UpdateProgress(job.ID, 10, "Analyzing packets...", 50); err != nil {
+		return "", "", err
+	}
+	log.Printf("[ANALYSIS] Capture file verified (format: %s): %s", capHandle.Format, job.FilePath)
 
 	// Create processor with options (qosEnabled=true, verbose=false)
 	processor := analyzer.NewProcessorWithOptions(true, false)
@@ -109,6 +106,9 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 	if err != nil {
 		log.Printf("[ANALYSIS] Analysis failed: %v", err)
 		return "", "", fmt.Errorf("analysis failed: %w", err)
+	}
+	if err := analyzer.VerifyCaptureHandle(capHandle, quality); err != nil {
+		return "", "", fmt.Errorf("capture changed during network analysis: %w", err)
 	}
 
 	// Check if cancelled

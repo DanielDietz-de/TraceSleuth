@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
@@ -388,3 +389,34 @@ func TestMain(m *testing.M) {
 
 // unused import guard
 var _ = filepath.Base
+
+// The analyzer must fail closed if a request was cancelled before its
+// preflight begins, instead of updating status to "analyzing" again.
+func TestAnalyzePCAPDoesNotReviveCancelledJob(t *testing.T) {
+	_, _, store := setupTestRouter(t)
+	path := filepath.Join(t.TempDir(), "input.pcap")
+	data := buildMinimalPCAP()
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	job, err := store.CreateJob(uuid.NewString(), "input.pcap", int64(len(data)), path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateProgress(job.ID, 1, "Preflight", 60); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CancelJob(job.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := AnalyzePCAP(store, job); !errors.Is(err, storage.ErrAnalysisCancelled) {
+		t.Fatalf("analysis ignored cancelled state: %v", err)
+	}
+	after, err := store.GetJob(job.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Status != storage.StatusCancelled {
+		t.Fatalf("cancelled job resumed: %+v", after)
+	}
+}

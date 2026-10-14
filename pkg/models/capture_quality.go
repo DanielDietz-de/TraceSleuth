@@ -28,6 +28,8 @@ type CaptureQuality struct {
 }
 
 type CaptureInterface struct {
+	SectionIndex        int     `json:"section_index"`
+	Filter              string  `json:"filter,omitempty"`
 	Index               int     `json:"index"`
 	Name                string  `json:"name,omitempty"`
 	LinkType            string  `json:"link_type"`

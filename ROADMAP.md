@@ -99,7 +99,8 @@ Primary promise:
 The initial preflight component is implemented for CLI and authenticated web:
 capture format, SHA-256 identity, PCAP/PCAPNG interface/packet metadata,
 packet truncation, timestamp disorder, observed link layers, reported drops,
-and clean rejection of malformed/empty captures. The web UI renders the
+multi-section PCAPNG interface attribution, filter-derived observability
+limitations, and clean rejection of malformed/empty captures. The web UI renders the
 observed status and limitations; positive, negative and malformed tests
 are provided.
 

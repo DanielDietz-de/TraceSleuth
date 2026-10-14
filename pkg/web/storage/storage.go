@@ -6,6 +6,7 @@ package storage
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -218,26 +219,41 @@ func (s *Storage) UpdateJob(job *AnalysisJob) error {
 	return nil
 }
 
+// ErrAnalysisCancelled prevents any progress or terminal update from
+// resurrecting a cancelled job while an expensive preflight is running.
+var ErrAnalysisCancelled = errors.New("analysis cancelled")
+
 // UpdateProgress updates job progress and notifies subscribers
 func (s *Storage) UpdateProgress(id string, progress int, currentStep string, estimatedTime int) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	job, err := s.GetJob(id)
 	if err != nil {
 		return err
 	}
-
+	if job.Status == StatusCancelled {
+		return ErrAnalysisCancelled
+	}
+	if job.Status == StatusCompleted {
+		return fmt.Errorf("analysis already completed")
+	}
 	job.Progress = progress
 	job.CurrentStep = currentStep
 	job.EstimatedTime = estimatedTime
 	job.Status = StatusAnalyzing
-
 	return s.UpdateJob(job)
 }
 
 // CompleteJob marks a job as completed
 func (s *Storage) CompleteJob(id, resultsPath, htmlPath string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	job, err := s.GetJob(id)
 	if err != nil {
 		return err
+	}
+	if job.Status == StatusCancelled {
+		return ErrAnalysisCancelled
 	}
 
 	now := time.Now()
@@ -254,9 +270,14 @@ func (s *Storage) CompleteJob(id, resultsPath, htmlPath string) error {
 
 // FailJob marks a job as failed
 func (s *Storage) FailJob(id, errorMsg string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	job, err := s.GetJob(id)
 	if err != nil {
 		return err
+	}
+	if job.Status == StatusCancelled {
+		return ErrAnalysisCancelled
 	}
 
 	now := time.Now()
@@ -270,9 +291,17 @@ func (s *Storage) FailJob(id, errorMsg string) error {
 
 // CancelJob marks a job as cancelled
 func (s *Storage) CancelJob(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	job, err := s.GetJob(id)
 	if err != nil {
 		return err
+	}
+	if job.Status == StatusCompleted || job.Status == StatusFailed {
+		return fmt.Errorf("analysis already finished")
+	}
+	if job.Status == StatusCancelled {
+		return nil
 	}
 
 	now := time.Now()

@@ -35,6 +35,22 @@ describe('capture quality panel', () => {
     expect(screen.getByText(/Ethernet/)).toBeInTheDocument();
   });
 
+  it('shows PCAPNG capture filters without implying STP/LACP observability', () => {
+    render(<CaptureQualityCard quality={{
+      ...good,
+      format: 'pcapng',
+      status: 'degraded',
+      interfaces: [
+        { section_index: 1, index: 0, name: 'uplink', link_type: 'Ethernet',
+          filter: 'tcp port 443', snap_length: 65535, packet_count: 3 },
+      ],
+      capabilities: ['ethernet', 'vlan'],
+    }} />);
+    expect(screen.getByText(/Capture filters restrict protocol visibility/)).toBeInTheDocument();
+    expect(screen.getByText(/tcp port 443/)).toBeInTheDocument();
+    expect(screen.getByText('Capture quality: Degraded')).toBeInTheDocument();
+  });
+
   it('shows actionable capture limitations separately from network findings', () => {
     render(
       <CaptureQualityCard

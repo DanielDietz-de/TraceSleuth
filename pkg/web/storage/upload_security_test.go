@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -158,5 +159,67 @@ func TestKeyLogMetadataRoundTripAndDeletion(t *testing.T) {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("sensitive file %s still exists: %v", path, err)
 		}
+	}
+}
+
+// Preflight may outlive a user cancellation. Progress, finalization and
+// failure handlers must never resurrect the cancelled terminal state.
+func TestCancellationCannotBeOverwrittenByLateProgress(t *testing.T) {
+	store := testUploadStorage(t)
+	id := uuid.NewString()
+	if _, err := store.CreateJob(id, "test.pcap", 4, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateProgress(id, 5, "Inspecting capture", 120); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CancelJob(id); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateProgress(id, 10, "Analyzing packets", 60); !errors.Is(err, ErrAnalysisCancelled) {
+		t.Errorf("progress revived a cancelled job: %v", err)
+	}
+	if err := store.CompleteJob(id, "", ""); !errors.Is(err, ErrAnalysisCancelled) {
+		t.Errorf("completion revived a cancelled job: %v", err)
+	}
+	if err := store.FailJob(id, "capture error"); !errors.Is(err, ErrAnalysisCancelled) {
+		t.Errorf("failure overwrote cancellation: %v", err)
+	}
+	job, err := store.GetJob(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != StatusCancelled || job.CurrentStep != "Analysis cancelled" {
+		t.Fatalf("cancelled job revived: %+v", job)
+	}
+}
+
+func TestConcurrentProgressCannotReviveCancellation(t *testing.T) {
+	store := testUploadStorage(t)
+	id := uuid.NewString()
+	if _, err := store.CreateJob(id, "test.pcap", 4, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateProgress(id, 0, "Initializing", 0); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 80; i++ {
+			_ = store.UpdateProgress(id, i, "Analyzing packets", 30)
+		}
+	}()
+	if err := store.CancelJob(id); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	job, err := store.GetJob(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != StatusCancelled {
+		t.Fatalf("concurrent update overwrote cancellation: %+v", job)
 	}
 }

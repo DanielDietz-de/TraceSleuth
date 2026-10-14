@@ -34,12 +34,12 @@ func main() {
 	usageOutput := os.Stderr
 	flag.Usage = func() {
 		fmt.Fprintf(usageOutput, `TraceSleuth v%s
-Comprehensive PCAP analysis tool for SD-WAN networks with advanced security detection,
+Network packet-capture analysis with inherited traffic, protocol and security inspection,
 performance monitoring, and interactive D3.js visualizations.
 
 USAGE:
-    sdwan-triage [OPTIONS] <pcap_file>
-    sdwan-triage -web [-port PORT] [-no-browser]
+    tracesleuth [OPTIONS] <pcap_file>
+    tracesleuth -web [-port PORT] [-no-browser]
 
 OPTIONS:
   Output Formats:
@@ -137,114 +137,120 @@ FEATURES:
 EXAMPLES:
   Basic Usage:
     # Console output with summary
-    sdwan-triage capture.pcap
+    tracesleuth capture.pcap
 
     # Generate interactive HTML report (recommended)
-    sdwan-triage -html report.html capture.pcap
+    tracesleuth -html report.html capture.pcap
 
     # Export to JSON for automation
-    sdwan-triage -json capture.pcap > results.json
+    tracesleuth -json capture.pcap > results.json
 
     # Export to CSV for spreadsheet analysis
-    sdwan-triage -csv findings.csv capture.pcap
+    tracesleuth -csv findings.csv capture.pcap
 
     # Generate PDF report
-    sdwan-triage -pdf report.pdf capture.pcap
+    tracesleuth -pdf report.pdf capture.pcap
 
   Filtering Examples:
     # Analyze traffic from specific source IP
-    sdwan-triage -src-ip 192.168.1.100 capture.pcap
+    tracesleuth -src-ip 192.168.1.100 capture.pcap
 
     # Analyze traffic to specific destination
-    sdwan-triage -dst-ip 10.0.0.50 capture.pcap
+    tracesleuth -dst-ip 10.0.0.50 capture.pcap
 
     # Filter by service (port name or number)
-    sdwan-triage -service https capture.pcap
-    sdwan-triage -service 443 capture.pcap
-    sdwan-triage -service dns capture.pcap
+    tracesleuth -service https capture.pcap
+    tracesleuth -service 443 capture.pcap
+    tracesleuth -service dns capture.pcap
 
     # Filter by protocol
-    sdwan-triage -protocol tcp capture.pcap
-    sdwan-triage -protocol udp capture.pcap
+    tracesleuth -protocol tcp capture.pcap
+    tracesleuth -protocol udp capture.pcap
 
     # Combine multiple filters
-    sdwan-triage -src-ip 192.168.1.100 -service https -html report.html capture.pcap
+    tracesleuth -src-ip 192.168.1.100 -service https -html report.html capture.pcap
 
   Security Analysis:
     # Detect DDoS attacks and port scans
-    sdwan-triage -config security -html security-report.html capture.pcap
+    tracesleuth -config security -html security-report.html capture.pcap
 
     # Analyze suspicious traffic from specific IP
-    sdwan-triage -src-ip 203.0.113.50 -html scan-report.html suspicious.pcap
+    tracesleuth -src-ip 203.0.113.50 -html scan-report.html suspicious.pcap
 
     # Check for malware IOCs and TLS weaknesses
-    sdwan-triage -html threat-analysis.html malware-capture.pcap
+    tracesleuth -html threat-analysis.html malware-capture.pcap
 
   Performance Troubleshooting:
     # Analyze network performance with QoS
-    sdwan-triage -qos-analysis -html performance.html slow-network.pcap
+    tracesleuth -qos-analysis -html performance.html slow-network.pcap
 
     # Investigate TCP retransmissions
-    sdwan-triage -protocol tcp -html tcp-issues.html capture.pcap
+    tracesleuth -protocol tcp -html tcp-issues.html capture.pcap
 
     # Troubleshoot VoIP quality issues
-    sdwan-triage -service sip -html voip-quality.html call-problems.pcap
+    tracesleuth -service sip -html voip-quality.html call-problems.pcap
 
   TCP Handshake Analysis:
     # Display detailed handshake analysis with color-coded states
-    sdwan-triage --show-handshakes capture.pcap
+    tracesleuth --show-handshakes capture.pcap
 
     # Show only failed handshakes for troubleshooting
-    sdwan-triage --show-handshakes --failed-only capture.pcap
+    tracesleuth --show-handshakes --failed-only capture.pcap
 
     # Custom handshake timeout for slow networks (5 seconds)
-    sdwan-triage --handshake-timeout 5 capture.pcap
+    tracesleuth --handshake-timeout 5 capture.pcap
 
     # Generate HTML report with Wireshark filters for each flow
-    sdwan-triage -html handshake-report.html --show-handshakes capture.pcap
+    tracesleuth -html handshake-report.html --show-handshakes capture.pcap
 
   SD-WAN Analysis:
     # Detect SD-WAN vendor and analyze tunnels
-    sdwan-triage -html sdwan-report.html overlay-traffic.pcap
+    tracesleuth -html sdwan-report.html overlay-traffic.pcap
 
     # Analyze VXLAN overlay network
-    sdwan-triage -service 4789 -html vxlan-analysis.html capture.pcap
+    tracesleuth -service 4789 -html vxlan-analysis.html capture.pcap
 
     # Check IPsec tunnel traffic
-    sdwan-triage -protocol esp -html ipsec-report.html capture.pcap
+    tracesleuth -protocol esp -html ipsec-report.html capture.pcap
 
   LAN Protocol Analysis (VRRP, CDP, LLDP, HSRP, STP):
     # Re-analyze capture with VRRP detection
-    sdwan-triage analyze vrrp-capture.pcap
+    tracesleuth analyze vrrp-capture.pcap
 
     # Check for VRRP flapping
-    sdwan-triage analyze vrrp-capture.pcap | jq '.lan_protocols.vrrp_sessions[] | select(.is_flapping == true)'
+    tracesleuth analyze vrrp-capture.pcap | jq '.lan_protocols.vrrp_sessions[] | select(.is_flapping == true)'
 
     # View VRRP timeline events
-    sdwan-triage analyze vrrp-capture.pcap | jq '.timeline[] | select(.protocol == "VRRP")'
+    tracesleuth analyze vrrp-capture.pcap | jq '.timeline[] | select(.protocol == "VRRP")'
 
     # Discover CDP devices
-    sdwan-triage -html report.html capture.pcap | jq '.lan_protocols.cdp_devices[]'
+    tracesleuth -html report.html capture.pcap | jq '.lan_protocols.cdp_devices[]'
 
     # Check HSRP failover events
-    sdwan-triage analyze capture.pcap | jq '.timeline[] | select(.protocol == "HSRP")'
+    tracesleuth analyze capture.pcap | jq '.timeline[] | select(.protocol == "HSRP")'
 
   Web Application Mode:
     # Start the interactive web UI (opens browser automatically)
-    sdwan-triage -web
+    tracesleuth -web
 
     # Start web UI on a custom port without auto-opening browser
-    sdwan-triage -web -port 9090 -no-browser
+    tracesleuth -web -port 9090 -no-browser
 
   Advanced Usage:
-    # Multiple output formats simultaneously
-    sdwan-triage -html report.html -json -csv findings.csv capture.pcap
+    # Generate HTML and CSV side by side
+    tracesleuth -html report.html -csv findings.csv capture.pcap
+
+    # Use -json by itself for a single machine-readable document
+    tracesleuth -json capture.pcap
+
+    # Comparison supports terminal text or -json only
+    tracesleuth -compare -json before.pcap after.pcap
 
     # Verbose output for debugging
-    sdwan-triage -verbose -html report.html capture.pcap
+    tracesleuth -verbose -html report.html capture.pcap
 
     # Custom configuration with filtering
-    sdwan-triage -config performance -dst-ip 10.0.0.1 -html report.html capture.pcap
+    tracesleuth -config performance -dst-ip 10.0.0.1 -html report.html capture.pcap
 
 OUTPUT FILES:
   HTML Report:  Interactive single-file report with D3.js visualizations
@@ -261,7 +267,7 @@ SUPPORTED PROTOCOLS:
   LAN:       VRRP, CDP, LLDP, HSRP, STP (with flapping detection)
 
 For more information and documentation:
-  https://github.com/gocisse/sdwan-triage
+  https://github.com/gocisse/tracesleuth
 
 `, version)
 	}
@@ -306,6 +312,11 @@ For more information and documentation:
 		os.Exit(2)
 	}
 
+	if *compareMode && *webMode {
+		fmt.Fprintln(os.Stderr, "Error: -compare cannot be used with -web")
+		os.Exit(2)
+	}
+
 	// Web application mode — start server and return
 	if *webMode {
 		intOpts := &IntegrationOptions{
@@ -341,12 +352,22 @@ For more information and documentation:
 	// Comparison is a separate analysis mode, not an extra operation appended
 	// after the first capture report. Return exactly one comparison document.
 	if *compareMode {
-		// The comparison engine currently implements JSON and interactive
-		// terminal output only. Do not report success for ignored exports.
-		if *csvOutput != "" || *htmlOutput != "" || *multiPageHTML != "" ||
-			*pdfOutput != "" || *simpleOutput || *tracePath || *bgpCheck ||
-			*appIdentify || *debugHTML {
-			fmt.Fprintln(os.Stderr, "Error: -compare does not support additional exports, trace-path, BGP, app-identify, or debug-html options")
+		// The comparison engine currently supports only comparison, JSON,
+		// verbose diagnostics and the no-external-lookup safety option.
+		// Reject every explicitly supplied analysis-only flag, including
+		// filters that would otherwise silently change the requested scope.
+		var unsupported []string
+		flag.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "compare", "json", "verbose", "no-external-lookup":
+				// Supported by comparison or safe to specify.
+			default:
+				unsupported = append(unsupported, "-"+f.Name)
+			}
+		})
+		if len(unsupported) != 0 {
+			fmt.Fprintf(os.Stderr, "Error: -compare does not support these options: %s\n",
+				strings.Join(unsupported, ", "))
 			os.Exit(2)
 		}
 		if flag.NArg() != 2 {

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -75,5 +76,33 @@ func TestCancelAnalysisCompletedJobReturnsConflict(t *testing.T) {
 	router.ServeHTTP(recorder, req)
 	if recorder.Code != http.StatusConflict {
 		t.Fatalf("HTTP %d, want 409 Conflict: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+// A failed analysis is a terminal state just like a completed one. The
+// cancellation response must never imply that the failed analysis succeeded.
+func TestCancelFailedAnalysisReportsFailedNotCompleted(t *testing.T) {
+	_, h, store := setupTestRouter(t)
+	id := uuid.NewString()
+	if _, err := store.CreateJob(id, "failure.pcap", 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.BeginAnalysis(id); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.FailJob(id, "broken packet stream"); err != nil {
+		t.Fatal(err)
+	}
+	router := gin.New()
+	router.POST("/api/analyze/:id/cancel", h.CancelAnalysis)
+	req := httptest.NewRequest(http.MethodPost, "/api/analyze/"+id+"/cancel", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("cancel failed job HTTP %d, want 409: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "\"status\":\"failed\"") ||
+		strings.Contains(rec.Body.String(), "completed") {
+		t.Fatalf("incorrect terminal-state cancellation response: %s", rec.Body.String())
 	}
 }

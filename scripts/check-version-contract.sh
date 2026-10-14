@@ -20,6 +20,7 @@ support_line="${version%.*}.x"
 grep -Fq "| \`$support_line\` |" SECURITY.md || fail "SECURITY.md does not describe support for current $support_line version line"
 grep -Fq "**Current version line:** \`$version\` bootstrap" ROADMAP.md || fail "ROADMAP.md does not declare $version as the current bootstrap line"
 grep -Fq 'The repository-root `VERSION` file is the authoritative source' docs/project/VERSIONING.md || fail 'VERSIONING.md does not declare VERSION authoritative'
+grep -Fq 'The current version is declared by the repository-root `VERSION` file' docs/project/RELEASE_PROCESS.md || fail 'RELEASE_PROCESS.md must derive current-release status from VERSION (not a stale hard-coded version)'
 grep -Fq 'BINARY_NAME  := tracesleuth' Makefile || fail 'Makefile does not build the tracesleuth product artifact'
 grep -Fq 'VERSION      := $(shell tr -d' Makefile || fail 'Makefile does not derive VERSION from the root VERSION file'
 grep -Fq 'BINARY_NAME: tracesleuth' .github/workflows/release.yml || fail 'release workflow artifact identity is not tracesleuth'

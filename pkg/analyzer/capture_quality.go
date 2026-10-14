@@ -89,6 +89,34 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 	interfacePackets := map[int]uint64{}
 	interfaceDepth := map[int]uint32{}
 	var usableEthernetDepth uint32
+	activeEthernetInterfaces := 0
+	// A single deeper interface must not conceal a shallow one. Capabilities
+	// require that EVERY active Ethernet capture point can observe the header.
+	observeEthernetDepth := func(sectionIndex, ifaceIndex int, snapLength, observedBytes uint32) {
+		depth := observedBytes
+		if snapLength != 0 && snapLength < depth {
+			depth = snapLength
+		}
+		if activeEthernetInterfaces == 0 || depth < usableEthernetDepth {
+			usableEthernetDepth = depth
+		}
+		activeEthernetInterfaces++
+		if depth < minLACPDUDepth {
+			severity := "informational"
+			if depth < minSTPBPDUDepth || (snapLength != 0 && snapLength < minLACPDUDepth) {
+				severity = "warning"
+				q.Status = "degraded"
+			}
+			q.Limitations = append(q.Limitations, models.CaptureQualityIssue{
+				Code:     "insufficient_layer2_capture_depth",
+				Severity: severity,
+				Description: fmt.Sprintf(
+					"Capture section %d interface %d retains at most %d Ethernet bytes (snap length %d); full STP/LACP evidence may be unavailable on this capture point.",
+					sectionIndex, ifaceIndex, depth, snapLength,
+				),
+			})
+		}
+	}
 	section := 0
 	anyCaptureFilter := false
 	// An interface without an Interface Statistics Block has UNKNOWN drops,
@@ -102,16 +130,7 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 	finishSection := func(interfaces []pcapgo.NgInterface) {
 		for idx, iface := range interfaces {
 			if iface.LinkType == layers.LinkTypeEthernet && interfacePackets[idx] > 0 {
-				depth := interfaceDepth[idx]
-				// PCAPNG permits an unspecified snap length (0). In that
-				// case rely on actual captured lengths rather than treating
-				// the interface as incapable of recording any packet bytes.
-				if iface.SnapLength != 0 && iface.SnapLength < depth {
-					depth = iface.SnapLength
-				}
-				if depth > usableEthernetDepth {
-					usableEthernetDepth = depth
-				}
+				observeEthernetDepth(section, idx, iface.SnapLength, interfaceDepth[idx])
 			}
 			info := models.CaptureInterface{
 				SectionIndex: section,
@@ -234,11 +253,8 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 		if err != nil {
 			return fail(err)
 		}
-		if classic.LinkType() == layers.LinkTypeEthernet {
-			usableEthernetDepth = interfaceDepth[0]
-			if classic.Snaplen() != 0 && classic.Snaplen() < usableEthernetDepth {
-				usableEthernetDepth = classic.Snaplen()
-			}
+		if classic.LinkType() == layers.LinkTypeEthernet && interfacePackets[0] > 0 {
+			observeEthernetDepth(0, 0, classic.Snaplen(), interfaceDepth[0])
 		}
 		q.Interfaces = append(q.Interfaces, models.CaptureInterface{
 			SectionIndex: 0, Index: 0, LinkType: classic.LinkType().String(),
@@ -274,13 +290,6 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 		}
 		if !anyCaptureFilter && usableEthernetDepth >= minLACPDUDepth {
 			q.Capabilities = append(q.Capabilities, "lacp_slow_protocols")
-		}
-		if usableEthernetDepth < minSTPBPDUDepth {
-			q.Status = "degraded"
-			q.Limitations = append(q.Limitations, models.CaptureQualityIssue{
-				Code: "insufficient_layer2_capture_depth", Severity: "warning",
-				Description: fmt.Sprintf("Only %d Ethernet bytes are usable; capture lacks enough packet depth to validate STP, LACP and potentially VLAN headers.", usableEthernetDepth),
-			})
 		}
 	} else {
 		q.Limitations = append(q.Limitations, models.CaptureQualityIssue{

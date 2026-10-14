@@ -105,5 +105,40 @@ for export in (["-html", "report.html"], ["-csv", "report.csv"], ["-pdf", "repor
     assert rejected.stdout == "", f"comparison export contaminated stdout: {rejected.stdout[:300]!r}"
     assert "-compare does not support" in rejected.stderr, (flags, rejected.stderr)
 
-print("CLI JSON smoke: single/compare valid; truncated captures and unsupported exports fail closed.")
+# Comparison is intentionally not a filtered single-capture analysis. Every
+# explicitly supplied analysis-only flag must fail closed instead of silently
+# emitting an unfiltered comparison that violates the caller's intent.
+for extra in (
+    ["-src-ip", "192.0.2.1"],
+    ["-dst-ip", "198.51.100.1"],
+    ["-service", "dns"],
+    ["-protocol", "tcp"],
+    ["-config", "performance"],
+    ["-qos-analysis"],
+    ["-show-handshakes"],
+    ["-handshake-timeout", "3"],
+):
+    flags = ["-compare", "-json", *extra, str(pcap), str(pcap)]
+    rejected = subprocess.run(
+        [binary, *flags],
+        cwd=tmp, capture_output=True, text=True, timeout=40, check=False,
+    )
+    assert rejected.returncode != 0, f"ignored filter unexpectedly accepted: {flags}"
+    assert rejected.stdout == "", f"comparison filter polluted JSON stdout: {rejected.stdout[:300]!r}"
+    assert "-compare does not support" in rejected.stderr, (flags, rejected.stderr)
+
+web_compare = subprocess.run(
+    [binary, "-compare", "-web", str(pcap), str(pcap)],
+    cwd=tmp, capture_output=True, text=True, timeout=10, check=False,
+)
+assert web_compare.returncode != 0 and "-compare cannot be used with -web" in web_compare.stderr
+assert web_compare.stdout == ""
+
+help_text = subprocess.run([binary, "-help"], cwd=tmp, capture_output=True,
+                           text=True, timeout=10, check=False)
+assert help_text.returncode == 0
+assert "-html report.html -json -csv" not in help_text.stdout
+assert "tracesleuth -json capture.pcap" in help_text.stdout
+
+print("CLI smoke: JSON remains parseable; rejected comparison exports/filters and help examples are consistent.")
 PY

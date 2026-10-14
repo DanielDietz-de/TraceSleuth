@@ -75,6 +75,18 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
 - Return sanitized comparison API errors with packet index and parser cause
   but never expose randomized host-side temporary paths.
 
+- Apply Ethernet, VLAN, STP and LACP capability-depth checks to every
+  active PCAPNG interface, never use another interface's deeper capture
+  as evidence that a shallow mirror/tap can observe those protocols.
+- Reject comparison-only invocations that supply analysis filters or
+  flags the comparator would ignore; correct the built-in CLI examples
+  and use the TraceSleuth command name in help output.
+- Return the actual terminal job state in cancellation conflicts so
+  a failure cannot be misrepresented as a successful completion.
+- Derive the release-process current-status text from the authoritative
+  root VERSION and validate that contract rather than leaving a stale
+  0.1.1 claim in the 0.2.0 release documentation.
+
 ### Remaining limitations
 
 - This is an **initial Phase 2 checkpoint**, not completed capture trust:

@@ -172,4 +172,8 @@ When a release is materially broken:
 
 ## Current release status
 
-TraceSleuth `0.1.1` is a hardened bootstrap milestone, not a production-ready release. It establishes provenance, audit, architecture contracts, roadmap and repository foundations while advanced detector and production-hardening work remains explicitly deferred.
+The current version is declared by the repository-root `VERSION` file,
+with the corresponding scope and unfinished milestones recorded in
+`CHANGELOG.md` and `ROADMAP.md`. All pre-1.0 releases remain
+prereleases and must not be represented as production-ready or as having
+implemented detectors that remain planned.

@@ -90,18 +90,24 @@ The project will aim to:
 
 ## Current known bootstrap limitations
 
-TraceSleuth `0.1.0` is explicitly not production-ready. The baseline audit documents inherited risks. Two critical inherited defaults have already been addressed in the bootstrap branch:
+TraceSleuth `0.1.1` is explicitly not production-ready. The baseline audit documents inherited risks. Important inherited defaults and upload flaws have now been addressed:
 
 - the universal `admin/admin` bootstrap credential was removed;
-- the hard-coded JWT fallback signing secret was removed.
+- the hard-coded JWT fallback signing secret was removed;
+- capture/keylog upload paths now use private randomized files, not user-supplied paths;
+- multipart HTTP body sizes and actual persisted bytes are bounded;
+- WebSocket JWTs are no longer accepted as URL query parameters (client and server updated together);
+- WebSocket browser Origin matching is exact rather than prefix-based.
+
+**Compatibility:** Frontends from before 0.1.1 use query-token WebSockets and must be updated in lockstep with the backend. WebSocket subprotocols still contain bearer credentials, so terminate TLS at a trusted reverse proxy for remote use and never log WebSocket request headers.
 
 Known remaining hardening work includes, but is not limited to:
 
-- uploaded filename/path construction;
+- full legacy file/import/export and symlink audit;
 - configurable retention and storage quotas;
 - global analysis concurrency/resource limits;
 - comprehensive parser fuzzing;
-- WebSocket query-token handling;
+- WebSocket session-token lifetime/revocation;
 - secure-header and CSRF review;
 - supported non-loopback deployment behavior;
 - reverse-proxy trust configuration;

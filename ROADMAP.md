@@ -16,7 +16,7 @@ Primary promise:
 
 ## Current status
 
-**Current version line:** `0.1.0` bootstrap  
+**Current version line:** `0.1.1` bootstrap
 **Production status:** not production-ready  
 **Stable detector catalogue:** not yet established  
 **Target stable release:** `1.0.0`

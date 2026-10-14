@@ -2,8 +2,11 @@ package middleware
 
 import (
 	"bytes"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 
+	"github.com/gin-gonic/gin"
 	"github.com/gocisse/sdwan-triage/pkg/database"
 )
 
@@ -77,5 +80,50 @@ func TestValidateTokenRejectsTokenSignedByDifferentInstance(t *testing.T) {
 
 	if _, err := validator.ValidateToken(token); err == nil {
 		t.Fatal("ValidateToken() accepted a token signed with another random instance secret")
+	}
+}
+
+func TestWebSocketSubprotocolTokenAllowedOnlyDuringUpgrade(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.GET("/api/ws/:id", func(c *gin.Context) {
+		c.String(http.StatusOK, webSocketHandshakeToken(c))
+	})
+	router.GET("/api/status", func(c *gin.Context) {
+		c.String(http.StatusOK, webSocketHandshakeToken(c))
+	})
+	for _, tc := range []struct {
+		path, upgrade, protocol, want string
+	}{
+		{"/api/ws/1", "websocket", "tracesleuth.jwt.abc.def.sig", "abc.def.sig"},
+		{"/api/ws/1?token=leaked", "websocket", "", ""},
+		{"/api/ws/1", "", "tracesleuth.jwt.abc", ""},
+		{"/api/status", "websocket", "tracesleuth.jwt.abc", ""},
+		{"/api/ws/1", "websocket", "unrelated", ""},
+	} {
+		req := httptest.NewRequest(http.MethodGet, tc.path, nil)
+		req.Header.Set("Upgrade", tc.upgrade)
+		req.Header.Set("Sec-WebSocket-Protocol", tc.protocol)
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		if w.Body.String() != tc.want {
+			t.Errorf("%q / %q / %q returned %q, want %q", tc.path, tc.upgrade, tc.protocol, w.Body.String(), tc.want)
+		}
+	}
+}
+
+func TestRequireAuthRejectsQueryToken(t *testing.T) {
+	auth := NewAuthConfig(nil)
+	router := gin.New()
+	router.GET("/api/status", auth.RequireAuth(), func(c *gin.Context) { c.Status(http.StatusNoContent) })
+	token, _, err := auth.GenerateToken(&database.User{ID: 12, Username: "user", Role: database.RoleAnalyst})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/status?token="+token, nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	if w.Code != http.StatusUnauthorized {
+		t.Fatalf("query token accepted: status %d", w.Code)
 	}
 }

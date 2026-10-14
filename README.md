@@ -6,13 +6,13 @@ TraceSleuth is an open-source PCAP analysis platform that automatically detects 
 
 > **Primary product promise:** Upload or analyze a packet capture and receive evidence-backed findings showing what appears wrong, why TraceSleuth reached that conclusion, which packets support it, how confident the diagnosis is, what alternative explanations exist, and how to validate the result independently.
 
-[![Version](https://img.shields.io/badge/version-0.1.0-blue)](VERSION)
+[![Version](https://img.shields.io/badge/version-0.1.1-blue)](VERSION)
 [![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Maturity](https://img.shields.io/badge/maturity-bootstrap%20%2F%20pre--1.0-orange)](ROADMAP.md)
 
 ## Current maturity
 
-**TraceSleuth 0.1.0 is a bootstrap and architecture-foundation release line. It is not yet production-ready.**
+**TraceSleuth 0.1.1 is a bootstrap and architecture-foundation release line. It is not yet production-ready.**
 
 The repository was imported from the MIT-licensed [SD-WAN Triage](https://github.com/gocisse/sdwan-triage) project and already contains substantial inherited PCAP analysis, web, CLI, packet inspection, reporting, protocol analysis, timeline, voice, security, and streaming comparison functionality.
 
@@ -285,9 +285,12 @@ Current bootstrap security changes include:
 - explicit environment-based first-administrator bootstrap;
 - no password logging;
 - fail-closed JWT secret generation with no hard-coded fallback;
+- randomized, private upload filenames instead of untrusted client paths;
+- HTTP multipart streaming limits and bounded key-log attachments;
+- same-origin WebSocket checks and JWT transport through WebSocket subprotocols instead of URL query strings;
 - CI vulnerability, secret, race, build, and CodeQL checks.
 
-Important hardening work remains before production-ready server deployment, including full upload filename/path hardening, resource budgets, configurable retention, secure non-loopback deployment behavior, parser fuzzing, storage quotas, comprehensive secure headers/CSRF review, and WebSocket token handling.
+Important hardening work remains before production-ready server deployment, including analysis resource budgets, configurable retention, secure non-loopback deployment behavior, parser fuzzing, storage quotas, full secure headers/CSRF review, and end-to-end cancellation.
 
 TraceSleuth is local-first. No mandatory cloud service or telemetry is part of the product mission.
 

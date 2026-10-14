@@ -119,7 +119,7 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 
 	// Create results directory
 	resultsDir := filepath.Join(store.GetResultsDir(), job.ID)
-	if err := os.MkdirAll(resultsDir, 0755); err != nil {
+	if err := os.MkdirAll(resultsDir, 0700); err != nil {
 		log.Printf("[ANALYSIS] Failed to create results directory: %v", err)
 		return "", "", fmt.Errorf("failed to create results directory: %w", err)
 	}
@@ -146,7 +146,7 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 		log.Printf("[ANALYSIS] Failed to marshal results: %v", err)
 		return "", "", fmt.Errorf("failed to marshal results: %w", err)
 	}
-	if err := os.WriteFile(jsonPath, jsonData, 0644); err != nil {
+	if err := os.WriteFile(jsonPath, jsonData, 0600); err != nil {
 		log.Printf("[ANALYSIS] Failed to write JSON results: %v", err)
 		return "", "", fmt.Errorf("failed to write JSON results: %w", err)
 	}

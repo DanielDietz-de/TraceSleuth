@@ -117,11 +117,10 @@ func (ac *AuthConfig) RequireAuth() gin.HandlerFunc {
 			}
 		}
 
-		// Fall back to a query parameter for the inherited browser WebSocket
-		// implementation. This remains a documented hardening item because query
-		// parameters can be exposed through access logs and intermediary systems.
+		// Browser WebSockets cannot set Authorization. Use a dedicated
+		// handshake subprotocol instead of a URL, which access logs can expose.
 		if tokenStr == "" {
-			tokenStr = c.Query("token")
+			tokenStr = webSocketHandshakeToken(c)
 		}
 
 		if tokenStr == "" {
@@ -199,4 +198,22 @@ func GenerateSecretHex() string {
 		panic(fmt.Sprintf("cannot generate cryptographic secret from operating-system CSPRNG: %v", err))
 	}
 	return hex.EncodeToString(b)
+}
+
+// webSocketHandshakeToken is deliberately restricted to WebSocket upgrades on
+// the progress route. Query-string JWTs are never accepted.
+func webSocketHandshakeToken(c *gin.Context) string {
+	if c.Request.Method != http.MethodGet ||
+		!strings.EqualFold(c.Request.Header.Get("Upgrade"), "websocket") ||
+		c.FullPath() != "/api/ws/:id" {
+		return ""
+	}
+	const prefix = "tracesleuth.jwt."
+	for _, field := range strings.Split(c.Request.Header.Get("Sec-WebSocket-Protocol"), ",") {
+		protocol := strings.TrimSpace(field)
+		if strings.HasPrefix(protocol, prefix) {
+			return strings.TrimPrefix(protocol, prefix)
+		}
+	}
+	return ""
 }

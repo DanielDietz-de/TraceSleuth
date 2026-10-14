@@ -16,6 +16,32 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
 - Generalized multi-capture correlation.
 - Retention, storage quotas, analysis resource limits, and comprehensive self-hosting hardening.
 
+## [0.1.1] - 2026-10-14
+
+### Security
+
+- Enforce per-request multipart byte ceilings before parsing, plus independent
+  stream-copy limits for captures (500 MiB), comparison captures (200 MiB each)
+  and optional TLS key logs (8 MiB).
+- Replace user-controlled upload path components with UUID-isolated, random,
+  private internal filenames; clean incomplete uploads.
+- Restrict sensitive local data directories to owner access and prevent
+  unmanaged result paths from being read or removed through persisted jobs.
+- Remove JWT authentication through URL query parameters and migrate browser
+  WebSockets to a dedicated handshake subprotocol; enforce exact-origin checks.
+- Persist and delete TLS key-log files correctly; sanitize display/download
+  filenames to prevent header injection.
+- Add focused Go regression tests for upload limits, traversal prevention,
+  storage containment, WebSocket origin/token handling and key-log lifecycle.
+
+### Compatibility
+
+- The backend and frontend must be upgraded together: pre-0.1.1 browsers
+  still send WebSocket query tokens, which the hardened backend rejects.
+- The application remains loopback-only by default and is **not yet
+  production-ready**; resource budgets, retention, capture preflight, and
+  parser fuzzing remain outstanding.
+
 ## [0.1.0] - 2026-07-09
 
 ### Added

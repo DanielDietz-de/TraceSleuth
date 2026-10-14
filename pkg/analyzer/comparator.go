@@ -278,6 +278,19 @@ func (c *Comparator) Compare(fileA, fileB string) (*ComparisonReport, error) {
 }
 
 // ─── Streaming Packet Reader ────────────────────────────────────
+// MalformedCaptureRecordError contains only the packet index and parser
+// cause; uploaded comparison filenames and server temp paths are never
+// included in errors that may be presented through the HTTP API.
+type MalformedCaptureRecordError struct {
+	Index int
+	Cause error
+}
+
+func (e *MalformedCaptureRecordError) Error() string {
+	return fmt.Sprintf("invalid packet record at index %d: %v", e.Index, e.Cause)
+}
+
+func (e *MalformedCaptureRecordError) Unwrap() error { return e.Cause }
 
 // streamFile opens a PCAP file and streams each packet through the callback.
 // Returns total packet count. No packet data is retained after the callback.
@@ -297,7 +310,7 @@ func (c *Comparator) streamFile(filePath string, onPacket func(*packetMeta)) (in
 			break
 		}
 		if err != nil {
-			return index, fmt.Errorf("invalid packet record at index %d in %s: %w", index, filePath, err)
+			return index, &MalformedCaptureRecordError{Index: index, Cause: err}
 		}
 
 		pkt := gopacket.NewPacket(data, reader.LinkType(), gopacket.Lazy)

@@ -414,3 +414,45 @@ func TestInspectCaptureGatesCapabilitiesByUsableEthernetDepth(t *testing.T) {
 		})
 	}
 }
+
+// The pinned pcapgo.Reader.Resolution reports the classic-PCAP magic in
+// reverse. Validate the actual original magic for both timestamp formats.
+func TestClassicPCAPTimestampResolutionFromMagic(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		nanos      bool
+		resolution string
+	}{
+		{"microsecond magic", false, "10^-6"},
+		{"nanosecond magic", true, "10^-9"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			writer := pcapgo.NewWriter(&buf)
+			if tc.nanos {
+				writer = pcapgo.NewWriterNanos(&buf)
+			}
+			if err := writer.WriteFileHeader(65535, layers.LinkTypeEthernet); err != nil {
+				t.Fatal(err)
+			}
+			frame := make([]byte, 60)
+			if err := writer.WritePacket(gopacket.CaptureInfo{
+				Timestamp:     time.Unix(123, 456789123),
+				CaptureLength: len(frame), Length: len(frame),
+			}, frame); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "resolution.pcap")
+			if err := os.WriteFile(path, buf.Bytes(), 0600); err != nil {
+				t.Fatal(err)
+			}
+			quality, err := InspectCapture(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(quality.Interfaces) != 1 || quality.Interfaces[0].TimestampResolution != tc.resolution {
+				t.Fatalf("timestamp resolution = %+v, want %q", quality.Interfaces, tc.resolution)
+			}
+		})
+	}
+}

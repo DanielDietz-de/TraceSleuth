@@ -8,10 +8,11 @@ TraceSleuth is currently pre-1.0.
 
 | Version line | Support status |
 |---|---|
-| `0.1.x` | Bootstrap/development line; security fixes may be applied while the product remains explicitly not production-ready. |
+| `0.2.x` | Current pre-1.0 development line. Security fixes are considered, but the product is **not production-ready**. |
+| `0.1.x` | Superseded bootstrap line; not receiving routine backports. Upgrade to the latest 0.2.x prerelease. |
 | Older or untagged upstream-derived builds | Not supported as TraceSleuth releases. |
 
-This table will be updated when additional release lines exist. It is not a promise of indefinite maintenance.
+Security fixes are best-effort while TraceSleuth is pre-1.0. This matrix is not a promise of indefinite maintenance.
 
 ## Reporting a vulnerability
 
@@ -90,7 +91,7 @@ The project will aim to:
 
 ## Current known bootstrap limitations
 
-TraceSleuth `0.1.1` is explicitly not production-ready. The baseline audit documents inherited risks. Important inherited defaults and upload flaws have now been addressed:
+TraceSleuth `0.2.0` and the earlier 0.1.x bootstrap line are explicitly not production-ready. The baseline audit documents inherited risks. Important inherited defaults and upload flaws have now been addressed:
 
 - the universal `admin/admin` bootstrap credential was removed;
 - the hard-coded JWT fallback signing secret was removed;

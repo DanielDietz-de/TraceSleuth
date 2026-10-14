@@ -93,5 +93,17 @@ assert bad_compare.returncode != 0, "corrupt comparison capture incorrectly acce
 assert bad_compare.stdout == "", "corrupt comparison emitted misleading JSON"
 assert "invalid packet record" in bad_compare.stderr, bad_compare.stderr
 
-print("CLI JSON smoke: single/compare are valid; malformed comparisons and arguments are rejected.")
+# Only terminal text and JSON are currently supported for comparison mode.
+# Do not pretend a requested HTML/CSV/PDF export succeeded while ignoring it.
+for export in (["-html", "report.html"], ["-csv", "report.csv"], ["-pdf", "report.pdf"], ["-simple"]):
+    flags = ["-compare", *export, str(pcap), str(pcap)]
+    rejected = subprocess.run(
+        [binary, *flags],
+        cwd=tmp, capture_output=True, text=True, timeout=40, check=False,
+    )
+    assert rejected.returncode != 0, f"ignored comparison export unexpectedly succeeded: {flags}"
+    assert rejected.stdout == "", f"comparison export contaminated stdout: {rejected.stdout[:300]!r}"
+    assert "-compare does not support" in rejected.stderr, (flags, rejected.stderr)
+
+print("CLI JSON smoke: single/compare valid; truncated captures and unsupported exports fail closed.")
 PY

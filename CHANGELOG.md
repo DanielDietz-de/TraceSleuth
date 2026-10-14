@@ -66,6 +66,14 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
 - Advertise Ethernet/VLAN/STP/LACP capture capabilities only when the usable
   captured frame depth can accommodate the required headers; test shallow
   snap-length PCAP fixtures.
+- Reject unsupported comparison export options rather than exit successfully
+  while silently ignoring requested CSV, HTML, PDF or simplified output.
+- Declare 0.2.x as the current supported prerelease security line and enforce
+  consistency between the support matrix and the root version contract.
+- Derive classic PCAP microsecond/nanosecond timestamp resolution from magic
+  bytes instead of the inverted value in the pinned gopacket reader.
+- Return sanitized comparison API errors with packet index and parser cause
+  but never expose randomized host-side temporary paths.
 
 ### Remaining limitations
 

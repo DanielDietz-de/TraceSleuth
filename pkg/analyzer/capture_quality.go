@@ -2,6 +2,7 @@ package analyzer
 
 import (
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
 )
@@ -24,6 +26,24 @@ const (
 )
 
 const timestampGapThreshold = 30 * time.Second
+
+// The pinned gopacket v1.1.19 Reader.Resolution() reverses microsecond
+// and nanosecond for classic PCAP. Use the original magic on the already-open
+// descriptor instead; ReadAt does not perturb the packet reader's position.
+func classicPCAPResolution(file *os.File) (string, error) {
+	var magic [4]byte
+	if _, err := file.ReadAt(magic[:], 0); err != nil {
+		return "", fmt.Errorf("read capture timestamp resolution: %w", err)
+	}
+	switch binary.BigEndian.Uint32(magic[:]) {
+	case pcapMagicBE, pcapMagicLE:
+		return gopacket.TimestampResolutionMicrosecond.String(), nil
+	case pcapMagicNS, pcapMagicNL:
+		return gopacket.TimestampResolutionNanosecond.String(), nil
+	default:
+		return "", fmt.Errorf("unknown classic capture magic")
+	}
+}
 
 // InspectCapture is the metadata-only form of InspectCaptureAndOpen. The
 // caller does not own a capture descriptor when this function returns.
@@ -210,6 +230,10 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 		}
 		finishSection(interfaces)
 	} else if classic, ok := cap.Reader.(*pcapgo.Reader); ok {
+		resolution, err := classicPCAPResolution(cap.File)
+		if err != nil {
+			return fail(err)
+		}
 		if classic.LinkType() == layers.LinkTypeEthernet {
 			usableEthernetDepth = interfaceDepth[0]
 			if classic.Snaplen() != 0 && classic.Snaplen() < usableEthernetDepth {
@@ -218,7 +242,7 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 		}
 		q.Interfaces = append(q.Interfaces, models.CaptureInterface{
 			SectionIndex: 0, Index: 0, LinkType: classic.LinkType().String(),
-			SnapLength: classic.Snaplen(), TimestampResolution: fmt.Sprint(classic.Resolution()),
+			SnapLength: classic.Snaplen(), TimestampResolution: resolution,
 			PacketCount: interfacePackets[0],
 		})
 	}

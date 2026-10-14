@@ -16,6 +16,8 @@ if ! printf '%s\n' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|
 fi
 
 grep -Fq "## [$version]" CHANGELOG.md || fail "CHANGELOG.md has no [$version] release section"
+support_line="${version%.*}.x"
+grep -Fq "| \`$support_line\` |" SECURITY.md || fail "SECURITY.md does not describe support for current $support_line version line"
 grep -Fq "**Current version line:** \`$version\` bootstrap" ROADMAP.md || fail "ROADMAP.md does not declare $version as the current bootstrap line"
 grep -Fq 'The repository-root `VERSION` file is the authoritative source' docs/project/VERSIONING.md || fail 'VERSIONING.md does not declare VERSION authoritative'
 grep -Fq 'BINARY_NAME  := tracesleuth' Makefile || fail 'Makefile does not build the tracesleuth product artifact'

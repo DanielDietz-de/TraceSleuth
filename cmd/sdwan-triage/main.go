@@ -70,7 +70,8 @@ OPTIONS:
     -bgp-check             Check BGP routing data for potential hijack indicators
 
   Multi-File Analysis:
-    -compare               Compare multiple PCAP files (provide multiple files as arguments)
+    -compare               Compare two PCAP files (console or -json output only;
+                           CSV/HTML/PDF export options are not supported)
 
   Web Application Mode:
     -web                   Start the interactive web application instead of CLI mode
@@ -340,6 +341,14 @@ For more information and documentation:
 	// Comparison is a separate analysis mode, not an extra operation appended
 	// after the first capture report. Return exactly one comparison document.
 	if *compareMode {
+		// The comparison engine currently implements JSON and interactive
+		// terminal output only. Do not report success for ignored exports.
+		if *csvOutput != "" || *htmlOutput != "" || *multiPageHTML != "" ||
+			*pdfOutput != "" || *simpleOutput || *tracePath || *bgpCheck ||
+			*appIdentify || *debugHTML {
+			fmt.Fprintln(os.Stderr, "Error: -compare does not support additional exports, trace-path, BGP, app-identify, or debug-html options")
+			os.Exit(2)
+		}
 		if flag.NArg() != 2 {
 			fmt.Fprintln(os.Stderr, "Error: -compare requires exactly two capture files")
 			os.Exit(2)

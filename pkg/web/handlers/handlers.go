@@ -16,6 +16,7 @@ import (
 	"github.com/gocisse/sdwan-triage/pkg/integration"
 	"github.com/gocisse/sdwan-triage/pkg/intelligence"
 	"github.com/gocisse/sdwan-triage/pkg/metrics"
+	"github.com/gocisse/sdwan-triage/pkg/middleware"
 	"github.com/gocisse/sdwan-triage/pkg/web/storage"
 	"github.com/gocisse/sdwan-triage/pkg/web/uploadsafe"
 	"github.com/google/uuid"
@@ -45,12 +46,7 @@ func NewHandlers(store *storage.Storage) *Handlers {
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
-			CheckOrigin: func(r *http.Request) bool {
-				origin := r.Header.Get("Origin")
-				// Allow localhost origins only
-				return strings.HasPrefix(origin, "http://127.0.0.1") ||
-					strings.HasPrefix(origin, "http://localhost")
-			},
+			CheckOrigin: middleware.SameOriginWebSocket,
 		},
 		integrations: &IntegrationConfig{},
 	}

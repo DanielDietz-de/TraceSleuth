@@ -117,11 +117,13 @@ func (ac *AuthConfig) RequireAuth() gin.HandlerFunc {
 			}
 		}
 
-		// Fall back to a query parameter for the inherited browser WebSocket
-		// implementation. This remains a documented hardening item because query
-		// parameters can be exposed through access logs and intermediary systems.
-		if tokenStr == "" {
-			tokenStr = c.Query("token")
+		// Browser WebSockets cannot add Authorization headers. Accept the
+		// token in a requested WebSocket subprotocol only on this exact route.
+		// Never accept query-string JWTs, which leak into access logs.
+		if tokenStr == "" && c.Request.Method == http.MethodGet &&
+			c.FullPath() == "/api/ws/:id" &&
+			strings.EqualFold(c.GetHeader("Upgrade"), "websocket") {
+			tokenStr = WebSocketBearerToken(c.Request)
 		}
 
 		if tokenStr == "" {

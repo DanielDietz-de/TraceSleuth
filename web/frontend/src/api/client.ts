@@ -384,8 +384,7 @@ export function createProgressWebSocket(
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const host = window.location.host;
   const token = getAuthToken();
-  const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-  const ws = new WebSocket(`${protocol}//${host}/api/ws/${id}${tokenParam}`);
+  const ws = new WebSocket(`${protocol}//${host}/api/ws/${id}`, token ? [`tracesleuth.jwt.${token}`] : []);
 
   ws.onmessage = (event) => {
     try {

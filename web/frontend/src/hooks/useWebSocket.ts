@@ -125,10 +125,10 @@ export function useWebSocket(
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     const host = window.location.host;
     const token = getAuthToken();
-    const tokenParam = token ? `?token=${encodeURIComponent(token)}` : '';
-    const wsUrl = `${protocol}//${host}/api/ws/${currentJobId}${tokenParam}`;
-    console.log(`[WS] Connecting to ${wsUrl.replace(/token=[^&]+/, 'token=***')}`);
-    const ws = new WebSocket(wsUrl);
+    const wsUrl = `${protocol}//${host}/api/ws/${currentJobId}`;
+    // Browser WebSockets cannot send Authorization headers. Send the JWT in
+    // a non-echoed subprotocol request rather than a logged URL parameter.
+    const ws = new WebSocket(wsUrl, token ? [`tracesleuth.jwt.${token}`] : []);
 
     ws.onopen = () => {
       console.log('[WS] Connected');

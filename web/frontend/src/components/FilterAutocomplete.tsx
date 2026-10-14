@@ -195,6 +195,28 @@ export const FilterAutocomplete: React.FC<FilterAutocompleteProps> = ({
     }));
   }, [value]);
 
+  // Insert selected suggestion
+  const insertSuggestion = useCallback((suggestion: Suggestion) => {
+    const trimmed = value.trim();
+    const lastToken = trimmed.split(/\s+/).pop() || '';
+    const beforeLastToken = trimmed.slice(0, trimmed.length - lastToken.length);
+
+    let newValue: string;
+    if (suggestion.insertText) {
+      newValue = trimmed + suggestion.insertText;
+    } else if (suggestion.type === 'field') {
+      // Replace the partial token with the full field name
+      newValue = beforeLastToken + suggestion.text;
+    } else {
+      newValue = trimmed + ' ' + suggestion.text;
+    }
+
+    onChange(newValue);
+    setIsOpen(false);
+    setSelectedIndex(0);
+    inputRef.current?.focus();
+  }, [value, onChange, inputRef]);
+
   // Handle keyboard navigation
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (!isOpen || suggestions.length === 0) {
@@ -224,29 +246,7 @@ export const FilterAutocomplete: React.FC<FilterAutocompleteProps> = ({
         setIsOpen(false);
         break;
     }
-  }, [isOpen, suggestions, selectedIndex, value, onApply]);
-
-  // Insert selected suggestion
-  const insertSuggestion = useCallback((suggestion: Suggestion) => {
-    const trimmed = value.trim();
-    const lastToken = trimmed.split(/\s+/).pop() || '';
-    const beforeLastToken = trimmed.slice(0, trimmed.length - lastToken.length);
-    
-    let newValue: string;
-    if (suggestion.insertText) {
-      newValue = trimmed + suggestion.insertText;
-    } else if (suggestion.type === 'field') {
-      // Replace the partial token with the full field name
-      newValue = beforeLastToken + suggestion.text;
-    } else {
-      newValue = trimmed + ' ' + suggestion.text;
-    }
-    
-    onChange(newValue);
-    setIsOpen(false);
-    setSelectedIndex(0);
-    inputRef.current?.focus();
-  }, [value, onChange, inputRef]);
+  }, [isOpen, suggestions, selectedIndex, value, onApply, insertSuggestion]);
 
   // Close dropdown when clicking outside
   useEffect(() => {

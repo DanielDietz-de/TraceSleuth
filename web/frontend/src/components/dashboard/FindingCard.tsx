@@ -84,7 +84,7 @@ export function FindingCard({ title, severity, count, description, details, know
       if (next.has(id)) next.delete(id);
       else next.add(id);
       if (findingKey) {
-        try { localStorage.setItem(`forensic-checklist-${findingKey}`, JSON.stringify([...next])); } catch {}
+        try { localStorage.setItem(`forensic-checklist-${findingKey}`, JSON.stringify([...next])); } catch { /* localStorage may be disabled; in-memory selection still works. */ }
       }
       return next;
     });

@@ -259,8 +259,8 @@ function runForceSimulation(nodes: TopoNode[], links: TopoLink[], width: number,
     for (let i = 0; i < nodes.length; i++) {
       for (let j = i + 1; j < nodes.length; j++) {
         const a = nodes[i], b = nodes[j];
-        let dx = b.x - a.x;
-        let dy = b.y - a.y;
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
         const dist = Math.max(Math.sqrt(dx * dx + dy * dy), 1);
         const force = REPULSION / (dist * dist);
         const fx = (dx / dist) * force;

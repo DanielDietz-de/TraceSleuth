@@ -384,7 +384,7 @@ export const vendorRunbooks: Record<string, VendorRunbook> = {
           ],
           script: [
             '# REST API: Verify all control connections are up',
-            'curl -k -b cookies.txt "https://<vmanage>:8443/dataservice/device/control/connections?deviceId=<system-ip>" | python3 -c "import sys,json; d=json.load(sys.stdin); print(all(c[\'state\']==\'up\' for c in d.get(\'data\',[])))\"',
+            'curl -k -b cookies.txt "https://<vmanage>:8443/dataservice/device/control/connections?deviceId=<system-ip>" | python3 -c "import sys,json; d=json.load(sys.stdin); print(all(c[\'state\']==\'up\' for c in d.get(\'data\',[])))"',
           ],
         },
         [

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { X, Copy, ChevronRight, ChevronDown, FileText, Layers, Hash, ArrowRightLeft } from 'lucide-react';
 import { PacketDetailResponse, LayerDetailView } from '../types';
 import { getAuthToken } from '../api/client';
@@ -25,13 +25,8 @@ const HexViewer: React.FC<HexViewerProps> = ({
   const [viewMode, setViewMode] = useState<'hex' | 'ascii'>('hex');
   const [copiedFilter, setCopiedFilter] = useState(false);
 
-  useEffect(() => {
-    if (isOpen && jobId && packetIndex >= 0) {
-      fetchPacket();
-    }
-  }, [isOpen, jobId, packetIndex]);
 
-  const fetchPacket = async () => {
+  const fetchPacket = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -49,7 +44,14 @@ const HexViewer: React.FC<HexViewerProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, [jobId, packetIndex]);
+
+  useEffect(() => {
+    if (isOpen && jobId && packetIndex >= 0) {
+      fetchPacket();
+    }
+  }, [isOpen, jobId, packetIndex, fetchPacket]);
+
 
   const toggleLayer = (name: string) => {
     setExpandedLayers(prev => {

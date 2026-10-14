@@ -149,6 +149,15 @@ function TroubleshootingGuidance({ results, onOpenWizard }: TroubleshootingGuida
   const activeFindings = useMemo(() => getActiveFindings(results), [results]);
   const [dismissed, setDismissed] = useState(false);
 
+  // Pick a matching symptom suggestion based on what's detected
+  const suggestedSymptom = useMemo(() => {
+    for (const symptom of wizardSymptoms) {
+      const matchCount = symptom.relatedFindings.filter(f => activeFindings.has(f)).length;
+      if (matchCount >= 2) return symptom;
+    }
+    return null;
+  }, [activeFindings]);
+
   if (dismissed) return null;
 
   // Sort findings by severity: Critical first, then Warning
@@ -159,15 +168,6 @@ function TroubleshootingGuidance({ results, onOpenWizard }: TroubleshootingGuida
   const criticalCount = sortedFindings.filter(([, v]) => v.severity === 'Critical').length;
   const warningCount = sortedFindings.filter(([, v]) => v.severity === 'Warning').length;
   const topFindings = sortedFindings.slice(0, 5);
-
-  // Pick a matching symptom suggestion based on what's detected
-  const suggestedSymptom = useMemo(() => {
-    for (const symptom of wizardSymptoms) {
-      const matchCount = symptom.relatedFindings.filter(f => activeFindings.has(f)).length;
-      if (matchCount >= 2) return symptom;
-    }
-    return null;
-  }, [activeFindings]);
 
   return (
     <div className="bg-gradient-to-br from-slate-800/90 to-slate-800/70 border border-purple-500/20 rounded-2xl overflow-hidden">
@@ -365,7 +365,7 @@ function FindingsPanel({ results, category, eli5Mode, detectedVendors, onFollowS
         </button>
       ),
     },
-  ], []);
+  ], [onFollowStream]);
 
   const rttColumns: Column<import('../../types').RTTFlow>[] = useMemo(() => [
     {

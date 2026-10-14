@@ -46,6 +46,15 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
 - Keep single-capture and comparison JSON-mode output parseable as exactly
   one document and reject conflicting export flags, with an executable
   smoke gate in both CI and the release workflow.
+- Make analysis claims atomic: reject starting cancelled/failed jobs,
+  prevent duplicate starts, and keep failed status terminal against late
+  progress updates.
+- Propagate cancellation through report-generation checkpoints and finalize
+  the job before any external integration hooks (tickets/webhooks/metrics).
+- Treat absent PCAPNG interface-statistics blocks as unknown drop counts,
+  not falsely reported zero; add absent/zero/nonzero ISB regression fixtures.
+- Keep CLI usage and invalid-argument diagnostics on stderr for JSON mode,
+  including missing capture and unrecognized option failures.
 
 ### Remaining limitations
 

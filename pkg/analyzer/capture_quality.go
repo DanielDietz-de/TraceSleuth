@@ -60,6 +60,9 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 	interfacePackets := map[int]uint64{}
 	section := 0
 	anyCaptureFilter := false
+	// An interface without an Interface Statistics Block has UNKNOWN drops,
+	// not a reported zero. The reader initializes absent stats to zero values.
+	statsObserved := map[int]bool{}
 
 	// NgReader's interface indices restart at each section. Its callback
 	// supplies the completed section before clearing the old interface list.
@@ -82,7 +85,7 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 					Description: fmt.Sprintf("Capture section %d interface %d used a packet filter. Protocols excluded by the filter are not observable.", section, idx),
 				})
 			}
-			if iface.Statistics.PacketsDropped != pcapgo.NgNoValue64 {
+			if statsObserved[idx] && iface.Statistics.PacketsDropped != pcapgo.NgNoValue64 {
 				drops := iface.Statistics.PacketsDropped
 				info.ReportedDrops = &drops
 				if drops > 0 {
@@ -97,6 +100,7 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 		}
 		section++
 		interfacePackets = make(map[int]uint64)
+		statsObserved = make(map[int]bool)
 	}
 
 	// SectionEndCallback does not fire for the final section on EOF.
@@ -104,6 +108,9 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 		WantMixedLinkType: true,
 		SectionEndCallback: func(ifaces []pcapgo.NgInterface, _ pcapgo.NgSectionInfo) {
 			finishSection(ifaces)
+		},
+		StatisticsCallback: func(index int, _ pcapgo.NgInterfaceStatistics) {
+			statsObserved[index] = true
 		},
 	}
 	cap, err := openCaptureOnFile(file, opts)

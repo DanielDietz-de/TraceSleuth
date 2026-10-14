@@ -29,9 +29,11 @@ var (
 var verbose *bool
 
 func main() {
-	// Define custom usage function
+	// Invalid flags or missing JSON arguments must not corrupt stdout.
+	// Explicit -help remains readable on stdout without JSON mode.
+	usageOutput := os.Stderr
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stdout, `TraceSleuth v%s
+		fmt.Fprintf(usageOutput, `TraceSleuth v%s
 Comprehensive PCAP analysis tool for SD-WAN networks with advanced security detection,
 performance monitoring, and interactive D3.js visualizations.
 
@@ -316,6 +318,9 @@ For more information and documentation:
 
 	// Show help if requested or no arguments provided
 	if *showHelp || flag.NArg() < 1 {
+		if *showHelp && !*jsonOutput {
+			usageOutput = os.Stdout
+		}
 		flag.Usage()
 		if *showHelp {
 			os.Exit(0)

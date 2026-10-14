@@ -67,5 +67,17 @@ invalid = subprocess.run(
 assert invalid.returncode != 0, "ambiguous JSON + CSV invocation unexpectedly succeeded"
 assert invalid.stdout == "", f"unexpected output on rejected invocation: {invalid.stdout!r}"
 assert "cannot be combined" in invalid.stderr, invalid.stderr
-print("CLI JSON smoke: single/compare produce exactly one JSON document; invalid combinations rejected.")
+
+# Bad arguments, including flags rejected before parsing, must never print
+# human usage on stdout when the caller requested machine-readable output.
+for flags in (["-json"], ["-json", "-unknown-flag"], ["-unknown-flag", "-json"]):
+    failed = subprocess.run(
+        [binary, *flags],
+        cwd=tmp, capture_output=True, text=True, timeout=40, check=False,
+    )
+    assert failed.returncode != 0, f"{flags} unexpectedly succeeded"
+    assert failed.stdout == "", f"{flags} contaminated JSON stdout: {failed.stdout[:500]!r}"
+    assert failed.stderr, f"{flags} did not report a diagnostic on stderr"
+
+print("CLI JSON smoke: single/compare produce one document; invalid arguments emit stderr only.")
 PY

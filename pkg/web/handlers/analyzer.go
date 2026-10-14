@@ -118,8 +118,11 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 		return "", "", fmt.Errorf("analysis cancelled")
 	}
 
-	// Update progress: Generating reports
-	store.UpdateProgress(job.ID, 85, "Generating JSON results...", 10)
+	// A cancellation can race with the post-detector status check. Reject
+	// it before creating any artifacts or invoking external integrations.
+	if err := store.UpdateProgress(job.ID, 85, "Generating JSON results...", 10); err != nil {
+		return "", "", err
+	}
 
 	// Create results directory
 	resultsDir := filepath.Join(store.GetResultsDir(), job.ID)
@@ -157,8 +160,9 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 
 	log.Printf("[ANALYSIS] JSON results saved to: %s (%d bytes)", jsonPath, len(jsonData))
 
-	// Update progress: Generating HTML
-	store.UpdateProgress(job.ID, 95, "Generating HTML report...", 3)
+	if err := store.UpdateProgress(job.ID, 95, "Generating HTML report...", 3); err != nil {
+		return "", "", err
+	}
 
 	// Generate HTML report
 	htmlPath := filepath.Join(resultsDir, "report.html")
@@ -169,14 +173,14 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 
 	log.Printf("[ANALYSIS] HTML report saved to: %s", htmlPath)
 
-	// Update progress: Complete
-	store.UpdateProgress(job.ID, 100, "Analysis complete!", 0)
-
+	// Complete atomically BEFORE executing external integration hooks.
+	// Cancellation that wins this transition prevents tickets, webhooks,
+	// and metrics from being triggered for abandoned work.
+	if err := store.CompleteJob(job.ID, jsonPath, htmlPath); err != nil {
+		return "", "", err
+	}
 	log.Printf("[ANALYSIS] Analysis completed successfully for job: %s", job.ID)
-
-	// ── Post-Analysis Integration Hooks ──────────────────────────
 	runPostAnalysisHooks(intCfg, report, job, analysisDuration)
-
 	return jsonPath, htmlPath, nil
 }
 

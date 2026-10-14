@@ -306,3 +306,66 @@ func TestPreflightAndAnalysisShareDescriptorAndDetectModification(t *testing.T) 
 		t.Fatal("accepted a capture whose opened descriptor changed after preflight")
 	}
 }
+
+// Interface Statistics Blocks are optional. In their absence, an interface
+// does not report zero drops; it has an unknown drop count.
+func TestInspectCapturePCAPNGDropStatisticsUnknownVsReported(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		writeStats     bool
+		drops          uint64
+		expectReported bool
+	}{
+		{name: "absent ISB", writeStats: false},
+		{name: "explicit zero drops", writeStats: true, drops: 0, expectReported: true},
+		{name: "explicit packet drops", writeStats: true, drops: 7, expectReported: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var buffer bytes.Buffer
+			writer, err := pcapgo.NewNgWriter(&buffer, layers.LinkTypeEthernet)
+			if err != nil {
+				t.Fatal(err)
+			}
+			frame := make([]byte, 60)
+			if err := writer.WritePacket(gopacket.CaptureInfo{
+				Timestamp:     time.Unix(1_000, 0),
+				CaptureLength: len(frame), Length: len(frame),
+			}, frame); err != nil {
+				t.Fatal(err)
+			}
+			if test.writeStats {
+				if err := writer.WriteInterfaceStats(0, pcapgo.NgInterfaceStatistics{
+					LastUpdate:      time.Unix(1_001, 0),
+					PacketsDropped:  test.drops,
+					PacketsReceived: pcapgo.NgNoValue64,
+				}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := writer.Flush(); err != nil {
+				t.Fatal(err)
+			}
+			path := filepath.Join(t.TempDir(), "capture.pcapng")
+			if err := os.WriteFile(path, buffer.Bytes(), 0600); err != nil {
+				t.Fatal(err)
+			}
+			q, err := InspectCapture(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(q.Interfaces) != 1 {
+				t.Fatalf("interfaces: %+v", q.Interfaces)
+			}
+			reported := q.Interfaces[0].ReportedDrops
+			if (reported != nil) != test.expectReported {
+				t.Fatalf("reported drops = %v; expected presence %v", reported, test.expectReported)
+			}
+			if reported != nil && *reported != test.drops {
+				t.Fatalf("reported drops = %d, want %d", *reported, test.drops)
+			}
+			if test.drops > 0 && q.Status != "degraded" {
+				t.Fatalf("reported drops did not degrade capture quality: %+v", q)
+			}
+		})
+	}
+}

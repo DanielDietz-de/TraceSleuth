@@ -997,7 +997,8 @@ func checkConnectivity(ip string, verbose bool) error {
 }
 
 // bgpPrefixResponse represents the RIPE stat API response for prefix overview
-type bgpPrefixResponse struct {	Status     string `json:"status"`
+type bgpPrefixResponse struct {
+	Status     string `json:"status"`
 	StatusCode int    `json:"status_code"`
 	Data       struct {
 		Resource string `json:"resource"`

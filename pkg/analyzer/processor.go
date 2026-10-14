@@ -997,7 +997,7 @@ func (p *Processor) finalizeTunnelAnalysis(report *models.TriageReport) {
 			DstIP:       tunnel.DstIP,
 			SrcPort:     tunnel.SrcPort,
 			DstPort:     tunnel.DstPort,
-			Identifier:  tunnel.VNI,			InnerProto:  tunnel.InnerProto,
+			Identifier: tunnel.VNI, InnerProto: tunnel.InnerProto,
 			PacketCount: tunnel.PacketCount,
 			ByteCount:   tunnel.ByteCount,
 			FirstSeen:   float64(tunnel.FirstSeen.UnixNano()) / 1e9,

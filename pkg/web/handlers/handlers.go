@@ -46,7 +46,7 @@ func NewHandlers(store *storage.Storage) *Handlers {
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
-			CheckOrigin: middleware.SameOriginWebSocket,
+			CheckOrigin:     middleware.SameOriginWebSocket,
 		},
 		integrations: &IntegrationConfig{},
 	}

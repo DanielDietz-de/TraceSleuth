@@ -86,11 +86,15 @@ func openCaptureOnFile(f *os.File, options pcapgo.NgReaderOptions) (*CaptureHand
 	if format == FormatPCAPNG {
 		// The decoder can mask truncated block tails as io.EOF. Validate the
 		// full block envelope before trusting any observed packet counts.
-		if err := validatePCAPNGBlockFraming(f); err != nil {
+		validatedSize, err := validatePCAPNGBlockFraming(f)
+		if err != nil {
 			return nil, fmt.Errorf("invalid PCAPNG block framing: %w", err)
 		}
+		// Never read beyond the validated byte extent if the original file
+		// is appended after preflight. Identity verification by the caller
+		// still rejects in-place edits and append races.
 		options.WantMixedLinkType = true
-		reader, err := pcapgo.NewNgReader(f, options)
+		reader, err := pcapgo.NewNgReader(io.NewSectionReader(f, 0, validatedSize), options)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create pcapng reader: %w", err)
 		}

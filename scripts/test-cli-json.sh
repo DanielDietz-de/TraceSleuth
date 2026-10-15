@@ -153,6 +153,8 @@ assert help_text.returncode == 0
 assert "-html report.html -json -csv" not in help_text.stdout
 assert "tracesleuth -json capture.pcap" in help_text.stdout
 assert "-no-external-lookup" in help_text.stdout
+assert "github.com/DanielDietz-de/TraceSleuth" in help_text.stdout
+assert "github.com/gocisse/tracesleuth" not in help_text.stdout
 assert "tracesleuth analyze " not in help_text.stdout
 
 print("CLI smoke: JSON/compare reject corrupt or empty captures, invalid flags, and misleading help.")

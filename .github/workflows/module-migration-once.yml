@@ -34,10 +34,10 @@ jobs:
           new = 'github.com/DanielDietz-de/TraceSleuth'
           go_mod = Path('go.mod')
           module_text = go_mod.read_text()
-          old_module_line = 'module ' + old + '\\n'
+          old_module_line = 'module ' + old + '\n'
           assert module_text.count(old_module_line) == 1, 'Unexpected Go module declaration'
-          go_mod.write_text(module_text.replace(old_module_line, 'module ' + new + '\\n', 1))
-          tracked = subprocess.check_output(['git', 'ls-files', '-z', '--', '*.go']).split(b'\\x00')
+          go_mod.write_text(module_text.replace(old_module_line, 'module ' + new + '\n', 1))
+          tracked = subprocess.check_output(['git', 'ls-files', '-z', '--', '*.go']).split(b'\x00')
           changes = 0
           for raw in tracked:
               if not raw:

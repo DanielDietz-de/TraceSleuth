@@ -74,3 +74,36 @@ func TestClassicPCAPFramingAcceptsBothEndianFormats(t *testing.T) {
 		})
 	}
 }
+
+func TestClassicPCAPFramingRejectsInvalidTimestampFractions(t *testing.T) {
+	path, clean := makeQualityFixture(t, false, []gopacket.CaptureInfo{{
+		Timestamp: time.Unix(1234, 0), CaptureLength: 60, Length: 60,
+	}})
+	for _, tc := range []struct {
+		name     string
+		magic    uint32
+		fraction uint32
+		valid    bool
+	}{
+		{"microsecond boundary accepted", pcapMagicBE, 999_999, true},
+		{"microsecond overflow rejected", pcapMagicBE, 1_000_000, false},
+		{"nanosecond boundary accepted", pcapMagicNS, 999_999_999, true},
+		{"nanosecond overflow rejected", pcapMagicNS, 1_000_000_000, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := append([]byte(nil), clean...)
+			binary.LittleEndian.PutUint32(data[0:4], tc.magic)
+			binary.LittleEndian.PutUint32(data[28:32], tc.fraction)
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := InspectCapture(path)
+			if tc.valid && err != nil {
+				t.Fatalf("valid fraction rejected: %v", err)
+			}
+			if !tc.valid && err == nil {
+				t.Fatal("fraction larger than clock resolution was accepted")
+			}
+		})
+	}
+}

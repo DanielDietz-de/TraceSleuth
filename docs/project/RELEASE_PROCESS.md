@@ -196,6 +196,41 @@ existing tag only when it identifies that same green commit. This is an
 explicitly documented pre-1.0 alternative, not a claim that the tag is
 GPG-signed.
 
+## Protected version-tag prerequisite
+
+The prerelease workflow **fails closed** unless GitHub reports an active tag
+ruleset covering the exact 'refs/tags/vX.Y.Z' with both **Restrict updates**
+and **Restrict deletions**, and without exposed bypass actors. This protection
+must apply **before** the tag is created: GitHub immutable releases lock the tag
+only *after* release publication and do not cover the validation-to-publication
+interval. The workflow independently revalidates the ruleset and the exact
+annotated/lightweight tag target immediately before publishing.
+
+A repository administrator must configure this once in **Settings → Rules →
+Rulesets → New tag ruleset**:
+
+1. Include 'refs/tags/v*' in the target tag pattern.
+2. Activate **Restrict updates** and **Restrict deletions**.
+3. **Do not restrict creations**: the scoped release workflow must be able to
+   create a new tag only after exact-SHA CI, Security and release validation.
+4. Configure **no bypass actors** for the version-tag ruleset. GitHub's
+   GITHUB_TOKEN may not expose a ruleset's bypass actor list; repository
+   administrators are responsible for confirming it contains no exceptions.
+5. Also enable **release immutability** under repository Settings → Releases to
+   lock assets and tags following publication; tag rulesets protect the
+   interval *before* release immutability takes effect.
+
+The workflow runs 'scripts/check-release-tag-protection.py' and its negative
+fixture tests are part of normal CI. No version tag ruleset means **no
+automated release**, even when other CI checks are green. This is an explicit
+supply-chain authorization gate, not a reason to skip review or publish by hand.
+
+The exact-commit workflow gate tolerates **up to 120 minutes** of CI/Security
+runtime (with a further 60-minute budget for build/package/validation), while
+still rejecting failed, cancelled, or missing runs. Tags remain bound to the
+actual published commit, including annotated tags; never force-move version
+tags as a workaround.
+
 ## Rollback and withdrawn releases
 
 Do not silently move an existing public release tag.

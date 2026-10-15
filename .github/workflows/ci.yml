@@ -34,6 +34,9 @@ jobs:
       - name: Validate release event authorization
         run: bash scripts/test-release-context.sh
 
+      - name: Validate version-tag protection policy fixtures
+        run: python3 -m unittest discover -s scripts -p 'test_release_tag_protection.py'
+
       - name: Validate changed-file hygiene
         shell: bash
         run: |

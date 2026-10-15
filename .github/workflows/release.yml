@@ -37,7 +37,7 @@ jobs:
       (github.event_name == 'push' && github.ref == 'refs/heads/main' &&
        startsWith(github.event.head_commit.message, 'release: v'))
     runs-on: ubuntu-latest
-    timeout-minutes: 80
+    timeout-minutes: 180
     steps:
       - name: Checkout
         uses: actions/checkout@v7
@@ -59,7 +59,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          for attempt in $(seq 1 90); do
+          # 120 minutes for concurrent hosted CI/CodeQL/scanner jobs, with
+          # 60 minutes reserved for build/publication gates.
+          for attempt in $(seq 1 720); do
             completed=0
             for flow in ci.yml security.yml; do
               url="repos/${GITHUB_REPOSITORY}/actions/workflows/${flow}/runs?head_sha=${GITHUB_SHA}&event=push&per_page=100"
@@ -82,6 +84,12 @@ jobs:
           done
           echo 'Timed out waiting for CI and Security on this exact commit.' >&2
           exit 1
+
+      - name: Require protected version-tag ruleset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/check-release-tag-protection.py '${{ steps.version.outputs.tag }}'
 
       - name: Prevent duplicate version publication
         shell: bash
@@ -254,6 +262,23 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
+          set -euo pipefail
+          # Recheck immediately before publication. The tag ruleset
+          # prevents an ordinary tag writer from moving this ref.
+          python3 scripts/check-release-tag-protection.py '${{ steps.version.outputs.tag }}'
+          tag='${{ steps.version.outputs.tag }}'
+          ref_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}")"
+          ref_type="$(jq -r ".object.type" <<<"$ref_json")"
+          ref_sha="$(jq -r ".object.sha" <<<"$ref_json")"
+          if [[ "$ref_type" == tag ]]; then
+            tag_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/$ref_sha")"
+            ref_type="$(jq -r ".object.type" <<<"$tag_json")"
+            ref_sha="$(jq -r ".object.sha" <<<"$tag_json")"
+          fi
+          if [[ "$ref_type" != commit || "$ref_sha" != "$GITHUB_SHA" ]]; then
+            echo "Refusing publication: protected tag does not point to validated SHA." >&2
+            exit 1
+          fi
           prerelease_args=()
           if [[ '${{ steps.version.outputs.version }}' == 0.* ]]; then
             prerelease_args+=(--prerelease)

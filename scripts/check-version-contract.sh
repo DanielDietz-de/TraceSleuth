@@ -24,10 +24,14 @@ grep -Fq 'The current version is declared by the repository-root `VERSION` file'
 grep -Fq 'BINARY_NAME  := tracesleuth' Makefile || fail 'Makefile does not build the tracesleuth product artifact'
 grep -Fq 'VERSION      := $(shell tr -d' Makefile || fail 'Makefile does not derive VERSION from the root VERSION file'
 grep -Fq 'BINARY_NAME: tracesleuth' .github/workflows/release.yml || fail 'release workflow artifact identity is not tracesleuth'
+grep -Fxq 'module github.com/DanielDietz-de/TraceSleuth' go.mod || fail 'Go module does not match TraceSleuth repository'
+if git grep -n -F 'github.com/gocisse/sdwan-triage/' -- '*.go'; then
+  fail 'Go source still imports the inherited module path'
+fi
 grep -Fq "version-${version}-blue" README.md || fail "README version badge is not aligned with VERSION=$version"
 
 # During the bootstrap phase a few legacy runtime surfaces intentionally remain,
-# including the Go module path, command source directory, frontend package name,
+# including the command source directory, frontend package name,
 # API metadata, and some configuration/storage paths. The baseline audit and
 # roadmap track those migration gaps explicitly; they are not treated as aligned
 # until the corresponding implementation work is complete and CI is extended.

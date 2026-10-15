@@ -28,8 +28,8 @@ export function LoginPage() {
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl bg-gradient-to-br from-blue-500 to-cyan-500 mb-4">
             <Network className="w-8 h-8 text-white" />
           </div>
-          <h1 className="text-2xl font-bold text-white">SD-WAN Triage</h1>
-          <p className="text-sm text-slate-400 mt-1">Enterprise Network Analysis Platform</p>
+          <h1 className="text-2xl font-bold text-white">TraceSleuth</h1>
+          <p className="text-sm text-slate-400 mt-1">Packets tell the story. TraceSleuth finds the problem.</p>
         </div>
 
         {/* Login Card */}

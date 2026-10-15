@@ -10,6 +10,8 @@ import {
   Lock,
   User,
   ArrowRightLeft,
+  Network,
+  Info,
   Sun,
   Moon
 } from 'lucide-react';
@@ -46,6 +48,7 @@ export function Layout({ children }: LayoutProps) {
     { path: '/', label: 'Upload', icon: Home },
     { path: '/compare', label: 'Compare', icon: ArrowRightLeft },
     { path: '/history', label: 'History', icon: History },
+    { path: '/about', label: 'About', icon: Info },
   ];
 
   const isActive = (path: string) => {
@@ -62,11 +65,13 @@ export function Layout({ children }: LayoutProps) {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
-            <Link to="/" className="flex items-center gap-3">
-              <img src="/logo.png" alt="SD-WAN Triage" className="w-10 h-10 rounded-lg object-contain" />
+            <Link to="/" aria-label="TraceSleuth home" className="flex items-center gap-3">
+              <div aria-hidden="true" className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white">
+                <Network className="h-6 w-6" />
+              </div>
               <div className="hidden sm:block">
-                <h1 className="text-lg font-bold text-gray-900 dark:text-white">SD-WAN Triage</h1>
-                <p className="text-xs text-gray-500 dark:text-slate-400">Network Analysis Tool</p>
+                <h1 className="text-lg font-bold text-gray-900 dark:text-white">TraceSleuth</h1>
+                <p className="text-xs text-gray-500 dark:text-slate-400">Packet capture analysis</p>
               </div>
             </Link>
 
@@ -189,8 +194,10 @@ export function Layout({ children }: LayoutProps) {
       <footer className="bg-white dark:bg-slate-800 border-t border-gray-200 dark:border-slate-700 mt-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <div className="flex flex-col sm:flex-row items-center justify-between gap-2 text-sm text-gray-500 dark:text-slate-400">
-            <p>SD-WAN Triage v4.3.0</p>
-            <p>Running locally on 127.0.0.1:8080</p>
+            <p>TraceSleuth v{__TRACESLEUTH_VERSION__}</p>
+            <Link to="/about" className="underline hover:text-gray-800 dark:hover:text-white">
+              About, upstream attribution and license
+            </Link>
           </div>
         </div>
       </footer>

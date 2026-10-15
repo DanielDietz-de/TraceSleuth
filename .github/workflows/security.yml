@@ -62,6 +62,49 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  frontend-audit:
+    name: Frontend dependency audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      # Both checks are mandatory. The first catches vulnerable production
+      # dependencies and the second prevents critical build-time tooling risks.
+      - name: Audit production and build-time dependencies
+        shell: bash
+        working-directory: web/frontend
+        run: |
+          set -uo pipefail
+          npm audit --omit=dev --audit-level=high 2>&1 | tee npm-audit-runtime.txt
+          runtime_status=${PIPESTATUS[0]}
+          npm audit --audit-level=critical 2>&1 | tee npm-audit-all.txt
+          all_status=${PIPESTATUS[0]}
+          if ((runtime_status != 0 || all_status != 0)); then
+            echo 'Frontend dependency audit failed: investigate the reported advisories.' >&2
+            exit 1
+          fi
+
+      - name: Upload frontend audit evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: frontend-dependency-audit
+          path: |
+            web/frontend/npm-audit-runtime.txt
+            web/frontend/npm-audit-all.txt
+          if-no-files-found: ignore
+          retention-days: 14
+
   secret-scan:
     name: Secret scan
     runs-on: ubuntu-latest

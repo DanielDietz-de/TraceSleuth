@@ -59,3 +59,24 @@ func TestCompareStreamingRejectsHeaderOnlyPCAPNG(t *testing.T) {
 		}
 	}
 }
+
+// The PCAPNG reader may conflate a partial block with a normal EOF after
+// reading good packets. Both comparison sides must reject this unsafe prefix.
+func TestCompareStreamingRejectsPartialPCAPNGTail(t *testing.T) {
+	corruptPath, cleanNG := makeQualityFixture(t, true, []gopacket.CaptureInfo{{
+		Timestamp: time.Unix(1_000, 0), CaptureLength: 60, Length: 60,
+	}})
+	partialBlock := []byte{0x06, 0, 0, 0, 0x40, 0, 0, 0, 0x00, 0x00}
+	if err := os.WriteFile(corruptPath, append(cleanNG, partialBlock...), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cleanPath, _ := makeQualityFixture(t, false, []gopacket.CaptureInfo{{
+		Timestamp: time.Unix(1_000, 0), CaptureLength: 60, Length: 60,
+	}})
+	comparator := NewComparator(false)
+	for _, pair := range [][2]string{{corruptPath, cleanPath}, {cleanPath, corruptPath}} {
+		if _, err := comparator.Compare(pair[0], pair[1]); err == nil {
+			t.Fatalf("PCAPNG with partial block yielded plausible comparison for %v", pair)
+		}
+	}
+}

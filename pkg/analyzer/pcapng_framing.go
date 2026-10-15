@@ -21,12 +21,28 @@ const (
 	maxPCAPNGIDBOptionBytes             = 2048
 	maxPCAPNGIDBMetadataBytes           = 1 << 20
 	maxPCAPNGTrailingOptionPaddingBytes = 4 << 10
+	// Limit metadata complexity, not just file bytes. A small upload can
+	// otherwise contain millions of tiny unknown blocks/options and force
+	// one syscall and one decoder iteration per record.
+	maxPCAPNGAllOptionBytes  = 2 << 20
+	maxPCAPNGOptionEntries   = 32 << 10
+	maxPCAPNGNonPacketBlocks = 32 << 10
 )
+
+type pcapngOptionBudget struct {
+	totalBytes       uint64
+	entries          uint64
+	idbMetadataBytes uint64
+}
 
 // validatePCAPNGOptions validates metadata TLVs *within* their containing
 // block. The pinned NgReader does not reliably distinguish truncated option
 // values from clean EOF and indexes some options without a length check.
-func validatePCAPNGOptions(file *os.File, start, end int64, order binary.ByteOrder, blockType uint32, idbMetadataBytes *uint64) error {
+func validatePCAPNGOptions(file *os.File, start, end int64, order binary.ByteOrder, blockType uint32, budget *pcapngOptionBudget) error {
+	if end < start || uint64(end-start) > maxPCAPNGAllOptionBytes-budget.totalBytes {
+		return fmt.Errorf("capture exceeds %d-byte PCAPNG option budget", maxPCAPNGAllOptionBytes)
+	}
+	budget.totalBytes += uint64(end - start)
 	var optionHeader [4]byte
 	for pos := start; pos < end; {
 		if end-pos < 4 {
@@ -34,6 +50,10 @@ func validatePCAPNGOptions(file *os.File, start, end int64, order binary.ByteOrd
 		}
 		if _, err := file.ReadAt(optionHeader[:], pos); err != nil {
 			return fmt.Errorf("read PCAPNG option at byte %d: %w", pos, err)
+		}
+		budget.entries++
+		if budget.entries > maxPCAPNGOptionEntries {
+			return fmt.Errorf("capture exceeds %d PCAPNG option entries", maxPCAPNGOptionEntries)
 		}
 		code := order.Uint16(optionHeader[:2])
 		length := uint64(order.Uint16(optionHeader[2:]))
@@ -85,10 +105,10 @@ func validatePCAPNGOptions(file *os.File, start, end int64, order binary.ByteOrd
 			if length > maxPCAPNGIDBOptionBytes {
 				return fmt.Errorf("PCAPNG interface option at byte %d exceeds %d-byte metadata field limit", pos, maxPCAPNGIDBOptionBytes)
 			}
-			if *idbMetadataBytes+length > maxPCAPNGIDBMetadataBytes {
+			if budget.idbMetadataBytes+length > maxPCAPNGIDBMetadataBytes {
 				return fmt.Errorf("capture exceeds %d-byte PCAPNG interface metadata budget", maxPCAPNGIDBMetadataBytes)
 			}
-			*idbMetadataBytes += length
+			budget.idbMetadataBytes += length
 		}
 		// Only validate known options *interpreted* by the pinned reader.
 		// Other legal TLVs are opaque but must respect their envelope.
@@ -150,7 +170,8 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 	var snaplens []uint32
 	sections := 0
 	interfaces := 0
-	var idbMetadataBytes uint64
+	var optionBudget pcapngOptionBudget
+	var nonPacketBlocks uint64
 	// The section-length field counts bytes after the Section Header Block.
 	// -1 in the on-wire signed value signifies unknown section length.
 	expectedSectionEnd := int64(-1)
@@ -188,6 +209,14 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 
 		blockType := order.Uint32(header[:4])
 		blockLength := order.Uint32(header[4:8])
+		// Normal traffic may contain many packet blocks. However, unbounded
+		// tiny metadata and unknown blocks permit record-amplification DoS.
+		if blockType != 2 && blockType != 3 && blockType != 6 {
+			nonPacketBlocks++
+			if nonPacketBlocks > maxPCAPNGNonPacketBlocks {
+				return 0, fmt.Errorf("capture exceeds %d PCAPNG non-packet blocks", maxPCAPNGNonPacketBlocks)
+			}
+		}
 		minimum := uint32(12)
 		switch blockType {
 		case 0x0a0d0d0a:
@@ -233,7 +262,7 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 				}
 				expectedSectionEnd = offset + int64(blockLength) + int64(declaredLength)
 			}
-			if err := validatePCAPNGOptions(file, offset+24, offset+int64(blockLength)-4, order, blockType, &idbMetadataBytes); err != nil {
+			if err := validatePCAPNGOptions(file, offset+24, offset+int64(blockLength)-4, order, blockType, &optionBudget); err != nil {
 				return 0, err
 			}
 		case 1: // Interface descriptor: 8-byte fixed data
@@ -246,11 +275,11 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 				return 0, fmt.Errorf("read interface descriptor: %w", err)
 			}
 			snaplens = append(snaplens, order.Uint32(desc[4:8]))
-			if err := validatePCAPNGOptions(file, offset+16, offset+int64(blockLength)-4, order, blockType, &idbMetadataBytes); err != nil {
+			if err := validatePCAPNGOptions(file, offset+16, offset+int64(blockLength)-4, order, blockType, &optionBudget); err != nil {
 				return 0, err
 			}
 		case 5: // Interface statistics: 12-byte fixed data
-			if err := validatePCAPNGOptions(file, offset+20, offset+int64(blockLength)-4, order, blockType, &idbMetadataBytes); err != nil {
+			if err := validatePCAPNGOptions(file, offset+20, offset+int64(blockLength)-4, order, blockType, &optionBudget); err != nil {
 				return 0, err
 			}
 		case 2, 6:

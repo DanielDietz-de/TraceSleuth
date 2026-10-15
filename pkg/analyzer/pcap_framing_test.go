@@ -56,6 +56,9 @@ func TestClassicPCAPFramingRejectsZeroSnaplen(t *testing.T) {
 	if _, err := InspectCapture(path); err == nil {
 		t.Fatal("zero classic PCAP snaplen accepted")
 	}
+	if _, err := NewComparator(false).Compare(path, path); err == nil {
+		t.Fatal("zero classic PCAP snaplen accepted by comparison")
+	}
 }
 
 func TestClassicPCAPFramingAcceptsBothEndianFormats(t *testing.T) {

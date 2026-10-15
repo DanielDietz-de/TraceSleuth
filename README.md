@@ -158,8 +158,10 @@ truncated captures fail preflight rather than producing misleading findings.
 For security, PCAPNG metadata options are validated before decoding:
 zero-length non-terminating options are rejected to prevent stale parser
 buffer reuse, and no more than 4 KiB of zero padding is allowed after an
-option terminator. This strict rule can reject otherwise readable but
-nonconforming captures; repair the capture at its source instead of
+option terminator. Metadata complexity is also bounded at 2 MiB of
+options, 32,768 TLVs and 32,768 non-packet blocks per capture. These
+pre-production safeguards can reject readable but excessive or nonconforming
+captures; repair the capture at its source instead of
 turning off the parser safeguard. It is not a substitute for the
 unimplemented global analysis quotas and fuzzing programme.
 

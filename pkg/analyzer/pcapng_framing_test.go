@@ -357,3 +357,54 @@ func TestPCAPNGFramingCapsTrailingOptionPadding(t *testing.T) {
 		})
 	}
 }
+
+// A bounded file with tiny unknown option TLVs can otherwise induce millions
+// of syscalls and repeated third-party decoder iterations without payload.
+func TestPCAPNGFramingRejectsUnboundedOptionEntries(t *testing.T) {
+	path, valid := makeQualityFixture(t, true, []gopacket.CaptureInfo{{
+		Timestamp: time.Unix(1000, 0), CaptureLength: 60, Length: 60,
+	}})
+	// Build a legal SHB carrying more than the global count budget of 4-byte
+	// values. No terminator: every TLV is a real option header/value pair.
+	body := make([]byte, 16+8*(maxPCAPNGOptionEntries+1))
+	binary.LittleEndian.PutUint32(body[:4], 0x1a2b3c4d)
+	binary.LittleEndian.PutUint16(body[4:6], 1)
+	binary.LittleEndian.PutUint64(body[8:16], ^uint64(0))
+	for i := 0; i < maxPCAPNGOptionEntries+1; i++ {
+		pos := 16 + 8*i
+		binary.LittleEndian.PutUint16(body[pos:pos+2], 2999)
+		binary.LittleEndian.PutUint16(body[pos+2:pos+4], 4)
+		copy(body[pos+4:pos+8], "abcd")
+	}
+	data := append(append([]byte(nil), valid...), framedPCAPNGBlock(0x0a0d0d0a, body)...)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectCapture(path); err == nil || !strings.Contains(err.Error(), "option entries") {
+		t.Fatalf("excessive PCAPNG option records accepted: %v", err)
+	}
+	if _, err := NewComparator(false).Compare(path, path); err == nil {
+		t.Fatal("comparison accepted a capture with unbounded option iteration")
+	}
+}
+
+func TestPCAPNGFramingRejectsUnboundedUnknownBlocks(t *testing.T) {
+	path, valid := makeQualityFixture(t, true, []gopacket.CaptureInfo{{
+		Timestamp: time.Unix(1000, 0), CaptureLength: 60, Length: 60,
+	}})
+	var data bytes.Buffer
+	data.Write(valid)
+	block := framedPCAPNGBlock(0xfeedab00, nil)
+	for i := 0; i <= maxPCAPNGNonPacketBlocks; i++ {
+		data.Write(block)
+	}
+	if err := os.WriteFile(path, data.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectCapture(path); err == nil || !strings.Contains(err.Error(), "non-packet blocks") {
+		t.Fatalf("excessive unknown PCAPNG blocks accepted: %v", err)
+	}
+	if _, err := NewComparator(false).Compare(path, path); err == nil {
+		t.Fatal("comparison accepted a capture with unbounded non-packet blocks")
+	}
+}

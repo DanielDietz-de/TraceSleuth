@@ -415,6 +415,55 @@ func TestInspectCaptureGatesCapabilitiesByUsableEthernetDepth(t *testing.T) {
 	}
 }
 
+// An ordinary short Ethernet frame is not evidence of a 60-byte snaplen.
+// Snaplen=65535 for classic PCAP and 0 (unlimited) in PCAPNG both permit
+// control-plane headers even when the only observed frame happens to be short.
+func TestInspectCaptureUntruncatedShortFrameDoesNotLimitCapabilities(t *testing.T) {
+	for _, useNG := range []bool{false, true} {
+		t.Run(map[bool]string{false: "pcap", true: "pcapng"}[useNG], func(t *testing.T) {
+			path, _ := makeQualityFixture(t, useNG, []gopacket.CaptureInfo{{
+				Timestamp: time.Unix(1234, 0), CaptureLength: 60, Length: 60,
+			}})
+			quality, err := InspectCapture(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := []string{"ethernet", "vlan", "stp_bpdu", "lacp_slow_protocols"}
+			if !reflect.DeepEqual(quality.Capabilities, want) {
+				t.Fatalf("short untruncated frame unexpectedly reduced capture capacity: %+v", quality)
+			}
+			if quality.Status != "good" {
+				t.Fatalf("untruncated capture was downgraded: %+v", quality)
+			}
+		})
+	}
+}
+
+// The PCAPNG reader may return io.EOF in the middle of a block. Verify
+// framing independently even after earlier packet records were valid.
+func TestInspectCaptureRejectsPartialPCAPNGTailAfterValidPacket(t *testing.T) {
+	path, clean := makeQualityFixture(t, true, []gopacket.CaptureInfo{{
+		Timestamp: time.Unix(1_000, 0), CaptureLength: 60, Length: 60,
+	}})
+	cases := map[string][]byte{
+		"partial header": append(append([]byte(nil), clean...), 0x06, 0, 0, 0, 0x40, 0),
+		"partial packet body": append(append([]byte(nil), clean...), 0x06, 0, 0, 0, 0x40, 0, 0, 0),
+		"bad closing length": append([]byte(nil), clean...),
+	}
+	// The last four bytes are the ending length of a complete PCAPNG block.
+	cases["bad closing length"][len(clean)-4] ^= 1
+	for name, input := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := os.WriteFile(path, input, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := InspectCapture(path); err == nil {
+				t.Fatal("malformed PCAPNG tail was accepted as clean EOF")
+			}
+		})
+	}
+}
+
 // The pinned pcapgo.Reader.Resolution reports the classic-PCAP magic in
 // reverse. Validate the actual original magic for both timestamp formats.
 func TestClassicPCAPTimestampResolutionFromMagic(t *testing.T) {
@@ -461,7 +510,9 @@ func TestClassicPCAPTimestampResolutionFromMagic(t *testing.T) {
 // STP/LACP appear observable across another interface with a short snaplen.
 func TestInspectCaptureMultipleInterfacesConservativelyGateCapabilities(t *testing.T) {
 	var buffer bytes.Buffer
-	writer, err := pcapgo.NewNgWriter(&buffer, layers.LinkTypeEthernet)
+	writer, err := pcapgo.NewNgWriterInterface(&buffer, pcapgo.NgInterface{
+		Name: "shallow-mirror", LinkType: layers.LinkTypeEthernet, SnapLength: 14,
+	}, pcapgo.DefaultNgWriterOptions)
 	if err != nil {
 		t.Fatal(err)
 	}

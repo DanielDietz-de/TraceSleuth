@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -137,6 +138,32 @@ type DiagnosticFinding struct {
 	RecommendedValidation   []string                `json:"recommended_validation"`
 }
 
+// validPacketSource checks actual capture and packet provenance without
+// treating interface zero as absent. No packet reference is synthesized.
+func validPacketSource(p PacketSourceReference) error {
+	if strings.TrimSpace(p.CaptureID) == "" || p.PacketNumber == 0 || strings.TrimSpace(p.Reason) == "" {
+		return errors.New("untraceable packet source reference")
+	}
+	if p.CaptureInterfaceID != nil && *p.CaptureInterfaceID < 0 {
+		return errors.New("negative capture interface identifier")
+	}
+	return nil
+}
+
+// hasNonemptyEntries ensures independently actionable validation content.
+// A slice containing blank strings is no better than an absent field.
+func hasNonemptyEntries(values []string) bool {
+	if len(values) == 0 {
+		return false
+	}
+	for _, v := range values {
+		if strings.TrimSpace(v) == "" {
+			return false
+		}
+	}
+	return true
+}
+
 // Validate enforces the minimum evidence contract for an emitted finding.
 // Evidence-free or temporally ungrounded claims must not pass as diagnoses.
 // This is stricter than the inherited report's ad-hoc issue arrays.
@@ -180,10 +207,26 @@ func (f DiagnosticFinding) Validate() error {
 			return fmt.Errorf("duplicate evidence ID %q", ev.ID)
 		}
 		evidenceIDs[ev.ID] = struct{}{}
-		if ev.Kind == "packet" && ev.Packet == nil {
-			return errors.New("packet evidence without packet source reference")
+		switch ev.Kind {
+		case "packet":
+			if ev.Packet == nil {
+				return errors.New("packet evidence without packet source reference")
+			}
+			if err := validPacketSource(*ev.Packet); err != nil {
+				return fmt.Errorf("invalid packet evidence %q: %w", ev.ID, err)
+			}
+		case "metric":
+			if ev.Value == nil || math.IsNaN(*ev.Value) || math.IsInf(*ev.Value, 0) ||
+				strings.TrimSpace(ev.Unit) == "" {
+				return fmt.Errorf("metric evidence %q lacks a finite value and unit", ev.ID)
+			}
+		default:
+			if ev.Value != nil && (math.IsNaN(*ev.Value) || math.IsInf(*ev.Value, 0)) {
+				return fmt.Errorf("evidence %q contains a non-finite value", ev.ID)
+			}
 		}
 	}
+	usedConfidenceEvidence := make(map[string]struct{}, len(f.Evidence))
 	for _, adj := range f.Confidence.Adjustments {
 		if len(adj.EvidenceIDs) == 0 {
 			return fmt.Errorf("confidence family %q lacks supporting evidence IDs", adj.EvidenceFamily)
@@ -192,20 +235,25 @@ func (f DiagnosticFinding) Validate() error {
 			if _, ok := evidenceIDs[id]; !ok {
 				return fmt.Errorf("confidence adjustment references unknown evidence %q", id)
 			}
+			if _, used := usedConfidenceEvidence[id]; used {
+				return fmt.Errorf("confidence reuses evidence %q across contributions", id)
+			}
+			usedConfidenceEvidence[id] = struct{}{}
 		}
 	}
-	if len(f.PacketReferences) == 0 || len(f.WiresharkFilters) == 0 ||
-		len(f.RecommendedValidation) == 0 {
+	if len(f.PacketReferences) == 0 || !hasNonemptyEntries(f.WiresharkFilters) ||
+		!hasNonemptyEntries(f.RecommendedValidation) {
 		return errors.New("finding lacks packet references or independent validation")
 	}
 	for _, p := range f.PacketReferences {
-		if p.CaptureID == "" || p.PacketNumber == 0 || p.Reason == "" {
-			return errors.New("untraceable packet source reference")
+		if err := validPacketSource(p); err != nil {
+			return err
 		}
 	}
-	if f.Certainty != CertaintyObserved && f.Certainty != CertaintyInformational &&
-		len(f.AlternativeExplanations) == 0 {
-		return errors.New("inferred finding omits alternative explanations")
+	if f.Certainty != CertaintyObserved && f.Certainty != CertaintyInformational {
+		if !hasNonemptyEntries(f.AlternativeExplanations) || !hasNonemptyEntries(f.CaptureLimitations) {
+			return errors.New("inferred finding omits substantive alternatives or capture limitations")
+		}
 	}
 	return nil
 }

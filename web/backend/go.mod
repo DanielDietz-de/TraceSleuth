@@ -1,4 +1,4 @@
-module github.com/gocisse/sdwan-triage/web/backend
+module github.com/DanielDietz-de/TraceSleuth/web/backend
 
 go 1.23.3
 
@@ -6,7 +6,7 @@ require (
 	github.com/alicebob/miniredis/v2 v2.31.1
 	github.com/gin-contrib/cors v1.5.0
 	github.com/gin-gonic/gin v1.9.1
-	github.com/gocisse/sdwan-triage v0.0.0
+	github.com/DanielDietz-de/TraceSleuth v0.0.0
 	github.com/google/gopacket v1.1.19
 	github.com/google/uuid v1.5.0
 	github.com/gorilla/websocket v1.5.1
@@ -51,4 +51,4 @@ require (
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
-replace github.com/gocisse/sdwan-triage => ../..
+replace github.com/DanielDietz-de/TraceSleuth => ../..

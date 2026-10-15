@@ -1,0 +1,54 @@
+name: One-time formatting of migrated Go source
+
+on:
+  push:
+    branches:
+      - feat/tracesleuth-module-migration
+    paths:
+      - .github/workflows/gofmt-migration-once.yml
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.repository == 'DanielDietz-de/TraceSleuth'
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout branch with history
+        uses: actions/checkout@v7
+        with:
+          ref: feat/tracesleuth-module-migration
+          fetch-depth: 0
+          persist-credentials: true
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Format only migrated tracked Go sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=c3f74a5c2c7b2ad5b85a0111e4bffd5825e17b95
+          mapfile -d '' changed < <(git diff --name-only -z --diff-filter=ACMR "$base"...HEAD -- '*.go')
+          if ((${#changed[@]} == 0)); then
+            echo 'No changed Go files to format.' >&2
+            exit 1
+          fi
+          gofmt -w "${changed[@]}"
+          test -z "$(gofmt -l "${changed[@]}")"
+          printf 'Validated Go formatting for %d migrated sources.\n' "${#changed[@]}"
+      - name: Commit mechanical formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- '*.go'; then
+            echo 'All Go files were already formatted.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -- '*.go'
+          git commit -m 'style(go): format migrated imports and inherited Go source'
+          git push origin HEAD:feat/tracesleuth-module-migration

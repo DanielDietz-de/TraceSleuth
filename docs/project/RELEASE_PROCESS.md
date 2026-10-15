@@ -157,18 +157,32 @@ release checks. A maintainer-signed tag may be prepared only for that exact
 approved commit and is **not** a release trigger.
 
 Historical commits in this repository contained a tag-triggered release
-workflow. Merely removing the trigger from current `main` does **not**
-retroactively rewrite those commits. Before accepting version tags from
-outside the guarded release job, administrators must independently verify
-that historical tag-push workflows cannot publish, e.g. by disabling that
-legacy workflow at repository level or enforcing an approved tag-creation
-policy. This residual historical trigger is a documented release blocker;
-do not claim it is solved solely by the revised YAML. Never invent or embed
-maintainer credentials in automation.
+workflow at `.github/workflows/release.yml`. Merely removing the trigger
+from current `main` does **not** retroactively rewrite those commits.
+Therefore the historical path is retained as a deliberately failing stub;
+the actual hardened release pipeline was moved to
+`.github/workflows/validated-release.yml` with its **independent workflow ID**.
+Before any publication, the new release workflow checks the historical
+workflow's actual GitHub Actions state and refuses to run unless it is
+`disabled_manually`. This makes the old workflow's deactivation an explicit,
+automatically attested prerequisite, not a trusting written assertion.
+No tag release may occur before this disable-state check succeeds.
+Never invent or embed maintainer credentials in automation.
+
+**One-time administrator action after the reviewed PR merges:** open GitHub
+**Actions → Legacy Release — disable this workflow → … → Disable workflow**,
+then verify that the original `.github/workflows/release.yml` workflow
+reports `state=disabled_manually`. Do not disable the separately named
+`validated-release.yml`. GitHub offers the equivalent authenticated
+REST operation `PUT /repos/{owner}/{repo}/actions/workflows/release.yml/disable`
+with Actions-write permission. The connected GitHub adapter currently
+does not expose this mutation, so it must be performed via approved GitHub
+administration access. Until confirmed, automated publishing is blocked.
 
 ## Controlled automated prerelease publication
 
-The Release workflow accepts **only** two trusted-default-branch events:
+The **Validated Release** workflow (`.github/workflows/validated-release.yml`)
+accepts **only** two trusted-default-branch events:
 
 - a GitHub Actions manual dispatch on current `main` supplying the exact
   `VERSION`; dispatch targeting a tag or other branch is rejected;
@@ -184,13 +198,18 @@ used by the release workflow; the workflow job condition independently enforces
 the event/ref restriction. In particular, a tag selected in the manual Actions
 UI is not equivalent to a pushed tag.
 
-The release job dispatches **fresh, attempt-specific CI and Security** runs
+Before doing any release work, the job proves that the legacy
+`.github/workflows/release.yml` is manually disabled at the workflow-ID
+level. The release job then dispatches **fresh, attempt-specific CI and
+Security** runs
 using `workflow_dispatch` on the exact current `main` commit. Their unique
 release-run/attempt ID must match the returned workflow runs, and **both must
 complete successfully on the exact release commit SHA**. Stale push runs
 cannot satisfy the release gate; later scheduled, pushed or manually requested
 failed/incomplete CI or Security checks invalidate earlier green results.
-The gate is rechecked before tag creation and immediately before publication;
+The gate is rechecked before tag creation and immediately before publication,
+including older workflow IDs whose later re-run attempt updates occur after
+the release attempt started;
 a moved `main` fails closed. This requires `actions:write` scoped to the
 release workflow's `GITHUB_TOKEN` and supported Actions dispatch permissions.
 The 120-minute wait remains bounded; missing, cancelled or timed-out runs are
@@ -249,8 +268,10 @@ Rulesets → New tag ruleset**:
 The workflow runs `scripts/check-release-tag-protection.py` and its negative
 fixture tests are part of normal CI. No qualifying and completely visible
 tag ruleset means **no automated release**, even when other CI checks are
-green. The documented historical tag-trigger risk must also be addressed;
-a safe new workflow alone does not make unsafe old tag flows disappear.
+green. The documented historical tag-trigger risk is separately verified using
+`scripts/check-legacy-release-disabled.py`: an active, missing or
+unverifiably disabled legacy workflow fails closed; the safe new workflow
+alone does not make unsafe old tag flows disappear.
 This is an explicit supply-chain authorization gate, not a reason to skip
 review or publish by hand.
 

@@ -6,10 +6,10 @@ release setting locks tags only AFTER publication. This helper checks
 repository/organization tag rulesets and refuses to publish if it cannot
 establish update and deletion protection for the exact release tag.
 
-The GitHub Actions token has read access to active rulesets, but GitHub may
-hide bypass_actor details from tokens without ruleset administration rights.
-Repository administrators must additionally ensure no nontrusted bypass
-actors are configured on the required tag ruleset.
+GitHub can omit bypass_actors for insufficiently privileged tokens.
+An omitted field cannot prove that bypass actors are absent, so this check
+fails closed. Release validation therefore needs a credential capable of
+reading authoritative ruleset details; do not silently trust redacted data.
 """
 from __future__ import annotations
 
@@ -21,9 +21,34 @@ import sys
 from typing import Any
 
 
+def certifiable_tag_pattern(pattern: Any) -> bool:
+    """Only accept tag patterns whose GitHub FNM_PATHNAME match is provable.
+
+    GitHub's '*' does not cross '/', unlike Python fnmatch against the full
+    ref. Reject recursive globs, character classes, and unknown patterns
+    rather than certifying potentially unprotected version tags.
+    """
+    if pattern == "~ALL":
+        return True
+    prefix = "refs/tags/"
+    if not isinstance(pattern, str) or not pattern.startswith(prefix):
+        return False
+    suffix = pattern[len(prefix):]
+    return bool(suffix) and "/" not in suffix and "**" not in suffix and not any(
+        char in suffix for char in "[]\\"
+    )
+
+
 def matches_pattern(ref: str, pattern: str) -> bool:
-    return pattern == "~ALL" or (
-        isinstance(pattern, str) and fnmatch.fnmatchcase(ref, pattern)
+    if not certifiable_tag_pattern(pattern):
+        return False
+    if pattern == "~ALL":
+        return True
+    prefix = "refs/tags/"
+    return (
+        ref.startswith(prefix)
+        and "/" not in ref[len(prefix):]
+        and fnmatch.fnmatchcase(ref[len(prefix):], pattern[len(prefix):])
     )
 
 
@@ -37,6 +62,10 @@ def protects_tag(ruleset: dict[str, Any], tag: str) -> bool:
     ref_name = conditions.get("ref_name") or {}
     includes = ref_name.get("include") or []
     excludes = ref_name.get("exclude") or []
+    if not isinstance(includes, list) or not isinstance(excludes, list):
+        return False
+    if not all(certifiable_tag_pattern(p) for p in includes + excludes):
+        return False
     ref = "refs/tags/" + tag
     if not any(matches_pattern(ref, pattern) for pattern in includes):
         return False
@@ -46,8 +75,9 @@ def protects_tag(ruleset: dict[str, Any], tag: str) -> bool:
     types = {r.get("type") for r in rules if isinstance(r, dict)}
     if not {"update", "deletion"}.issubset(types):
         return False
-    # When GitHub exposes bypass actors, require no exceptions.
-    if ruleset.get("bypass_actors"):
+    # Missing/hidden bypass metadata does NOT mean no bypass exists.
+    # Never allow release publication using a redacted policy response.
+    if "bypass_actors" not in ruleset or ruleset["bypass_actors"] != []:
         return False
     return True
 
@@ -99,8 +129,9 @@ def main(argv: list[str]) -> int:
     if not any(protects_tag(rule, tag) for rule in rulesets):
         print(
             f"Refusing {tag}: no active tag ruleset with update+deletion "
-            "protection and no exposed bypass, matching the exact release ref. "
-            "Configure repository Rules > Rulesets for refs/tags/v* first.",
+            "protection and an explicitly empty bypass_actors list, matching "
+            "the exact release ref. Check ruleset read permissions and "
+            "configure Repository Rules > Rulesets for refs/tags/v*.",
             file=sys.stderr,
         )
         return 1

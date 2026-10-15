@@ -78,7 +78,7 @@ Primary promise:
 - [ ] update Go module path without breaking imports
 - [ ] migrate product-facing UI title, API metadata, reports and storage names
 - [x] establish full project README
-- [ ] add visible About/upstream attribution in UI
+- [x] add visible About/upstream attribution in UI
 - [x] add normal CI workflow
 - [x] add static analysis/security workflows
 - [x] add repository hygiene/version alignment tests

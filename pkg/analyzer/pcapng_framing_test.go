@@ -5,7 +5,6 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -111,8 +110,7 @@ func TestPCAPNGFramingAcceptsCompleteSimplePacket(t *testing.T) {
 	if err != nil || size != int64(len(data)) {
 		t.Fatalf("valid simple packet framing rejected: size %d, error %v", size, err)
 	}
-	if _, err := InspectCapture(path); err != nil &&
-		!strings.Contains(err.Error(), "timestamp") {
+	if _, err := InspectCapture(path); err != nil {
 		t.Fatalf("valid SPB rejected by higher-level preflight: %v", err)
 	}
 }

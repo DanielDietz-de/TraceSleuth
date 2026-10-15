@@ -1,4 +1,5 @@
 name: CI
+run-name: ${{ inputs.release_gate_id != '' && format('release-gate-{0}', inputs.release_gate_id) || github.workflow }}
 
 on:
   pull_request:
@@ -6,6 +7,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      release_gate_id:
+        description: 'Optional validation attempt ID for a trusted release run'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -36,6 +42,9 @@ jobs:
 
       - name: Validate version-tag protection policy fixtures
         run: python3 -m unittest discover -s scripts -p 'test_release_tag_protection.py'
+
+      - name: Validate fresh release-gate contract fixtures
+        run: python3 -m unittest discover -s scripts -p 'test_require_release_gates.py'
 
       - name: Validate changed-file hygiene
         shell: bash

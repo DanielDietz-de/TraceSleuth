@@ -782,7 +782,7 @@ func TestPreflightRejectsEmptyCapturedPacketRecords(t *testing.T) {
 		Timestamp: time.Unix(1000, 0), CaptureLength: 60, Length: 60,
 	}})
 	for _, tc := range []struct {
-		name string
+		name  string
 		block []byte
 	}{
 		{"EPB", framedPCAPNGBlock(6, make([]byte, 20))},

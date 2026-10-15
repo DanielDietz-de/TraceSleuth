@@ -1,10 +1,21 @@
 /// <reference types="vitest" />
+import { readFileSync } from 'node:fs'
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
+
+// Keep browser version metadata tied to the authoritative repository VERSION.
+// Avoid the inherited frontend package.json version, which is not a product version.
+const tracesleuthVersion = readFileSync(new URL('../../VERSION', import.meta.url), 'utf8').trim()
+if (!/^\d+\.\d+\.\d+$/.test(tracesleuthVersion)) {
+  throw new Error('Invalid authoritative TraceSleuth VERSION')
+}
 
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __TRACESLEUTH_VERSION__: JSON.stringify(tracesleuthVersion),
+  },
   test: {
     globals: true,
     environment: 'jsdom',

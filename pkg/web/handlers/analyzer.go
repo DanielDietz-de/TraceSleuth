@@ -15,6 +15,7 @@ import (
 	"github.com/gocisse/sdwan-triage/pkg/models"
 	"github.com/gocisse/sdwan-triage/pkg/output"
 	"github.com/gocisse/sdwan-triage/pkg/web/storage"
+	"github.com/google/uuid"
 )
 
 // WebResultsWrapper wraps TriageReport with metadata fields expected by the frontend
@@ -42,29 +43,30 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 	}
 	log.Printf("[ANALYSIS] Starting analysis for job: %s, file: %s", job.ID, job.FileName)
 
-	// Update progress: Starting
-	store.UpdateProgress(job.ID, 5, "Opening PCAP file...", 60)
-
-	// Open capture file (auto-detects pcap vs pcapng)
-	capHandle, err := analyzer.OpenCapture(job.FilePath)
+	// Capture validity/observability is established before fault detectors.
+	if err := store.UpdateProgress(job.ID, 5, "Validating capture integrity...", 60); err != nil {
+		return "", "", err
+	}
+	quality, capHandle, err := analyzer.InspectCaptureAndOpen(job.FilePath)
 	if err != nil {
-		log.Printf("[ANALYSIS] Failed to open capture file: %v", err)
-		return "", "", fmt.Errorf("failed to open capture file: %w", err)
+		return "", "", fmt.Errorf("capture quality preflight failed: %w", err)
 	}
 	defer capHandle.Close()
 	reader := capHandle.Reader
 
-	log.Printf("[ANALYSIS] Capture file opened (format: %s): %s", capHandle.Format, job.FilePath)
-
-	// Update progress: Analyzing
-	store.UpdateProgress(job.ID, 10, "Analyzing packets...", 50)
+	// Cancellation may arrive during the hash/packet preflight. Never
+	// overwrite the terminal cancelled state after returning from preflight.
+	if err := store.UpdateProgress(job.ID, 10, "Analyzing packets...", 50); err != nil {
+		return "", "", err
+	}
+	log.Printf("[ANALYSIS] Capture file verified (format: %s): %s", capHandle.Format, job.FilePath)
 
 	// Create processor with options (qosEnabled=true, verbose=false)
 	processor := analyzer.NewProcessorWithOptions(true, false)
 
 	// Initialize analysis state and report
 	state := models.NewAnalysisState()
-	report := &models.TriageReport{}
+	report := &models.TriageReport{CaptureQuality: quality}
 
 	// Use the existing Process method which handles everything
 	startTime := time.Now()
@@ -106,6 +108,9 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 		log.Printf("[ANALYSIS] Analysis failed: %v", err)
 		return "", "", fmt.Errorf("analysis failed: %w", err)
 	}
+	if err := analyzer.VerifyCaptureHandle(capHandle, quality); err != nil {
+		return "", "", fmt.Errorf("capture changed during network analysis: %w", err)
+	}
 
 	// Check if cancelled
 	currentJob, err := store.GetJob(job.ID)
@@ -114,18 +119,26 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 		return "", "", fmt.Errorf("analysis cancelled")
 	}
 
-	// Update progress: Generating reports
-	store.UpdateProgress(job.ID, 85, "Generating JSON results...", 10)
+	// A cancellation can race with the post-detector status check. Reject
+	// it before creating any artifacts or invoking external integrations.
+	if err := store.UpdateProgress(job.ID, 85, "Generating JSON results...", 10); err != nil {
+		return "", "", err
+	}
 
-	// Create results directory
+	// Reject corrupted persisted job IDs before constructing output paths.
+	if _, err := uuid.Parse(job.ID); err != nil {
+		return "", "", fmt.Errorf("invalid analysis job identifier: %w", err)
+	}
 	resultsDir := filepath.Join(store.GetResultsDir(), job.ID)
 	if err := os.MkdirAll(resultsDir, 0700); err != nil {
 		log.Printf("[ANALYSIS] Failed to create results directory: %v", err)
 		return "", "", fmt.Errorf("failed to create results directory: %w", err)
 	}
+	artifacts := newReportArtifacts(resultsDir)
+	defer artifacts.rollbackUnlessPublished()
 
 	// Count packets from the report data
-	packetCount := countPacketsFromReport(report)
+	packetCount := int(quality.PacketCount)
 	log.Printf("[ANALYSIS] Total packets analyzed: %d", packetCount)
 
 	// Wrap report with metadata for frontend
@@ -140,7 +153,7 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 	}
 
 	// Save JSON results with metadata
-	jsonPath := filepath.Join(resultsDir, "results.json")
+	jsonPath := artifacts.jsonPath
 	jsonData, err := json.MarshalIndent(webResults, "", "  ")
 	if err != nil {
 		log.Printf("[ANALYSIS] Failed to marshal results: %v", err)
@@ -153,11 +166,12 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 
 	log.Printf("[ANALYSIS] JSON results saved to: %s (%d bytes)", jsonPath, len(jsonData))
 
-	// Update progress: Generating HTML
-	store.UpdateProgress(job.ID, 95, "Generating HTML report...", 3)
+	if err := store.UpdateProgress(job.ID, 95, "Generating HTML report...", 3); err != nil {
+		return "", "", err
+	}
 
 	// Generate HTML report
-	htmlPath := filepath.Join(resultsDir, "report.html")
+	htmlPath := artifacts.htmlPath
 	if err := output.GenerateHTMLReport(report, htmlPath, "enterprise"); err != nil {
 		log.Printf("[ANALYSIS] Failed to generate HTML report: %v", err)
 		return "", "", fmt.Errorf("failed to generate HTML report: %w", err)
@@ -165,14 +179,15 @@ func AnalyzePCAP(store *storage.Storage, job *storage.AnalysisJob, integrations 
 
 	log.Printf("[ANALYSIS] HTML report saved to: %s", htmlPath)
 
-	// Update progress: Complete
-	store.UpdateProgress(job.ID, 100, "Analysis complete!", 0)
-
+	// Complete atomically BEFORE executing external integration hooks.
+	// Cancellation that wins this transition prevents tickets, webhooks,
+	// and metrics from being triggered for abandoned work.
+	if err := store.CompleteJob(job.ID, jsonPath, htmlPath); err != nil {
+		return "", "", err
+	}
+	artifacts.published = true
 	log.Printf("[ANALYSIS] Analysis completed successfully for job: %s", job.ID)
-
-	// ── Post-Analysis Integration Hooks ──────────────────────────
 	runPostAnalysisHooks(intCfg, report, job, analysisDuration)
-
 	return jsonPath, htmlPath, nil
 }
 

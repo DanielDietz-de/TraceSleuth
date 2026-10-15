@@ -62,6 +62,49 @@ export interface HistoryResponse {
   offset: number;
 }
 
+// Capture preflight: observations about the file and capture method, not
+// assertions that the observed network itself is healthy or unhealthy.
+export interface CaptureQualityIssue {
+  code: string;
+  severity: 'warning' | 'informational';
+  count?: number;
+  description: string;
+}
+
+export interface CaptureInterfaceSummary {
+  section_index: number;
+  index: number;
+  name?: string;
+  link_type: string;
+  filter?: string;
+  snap_length: number;
+  timestamp_resolution?: string;
+  packet_count: number;
+  reported_drops?: number;
+}
+
+export interface CaptureQualitySummary {
+  interfaces?: CaptureInterfaceSummary[];
+  sha256: string;
+  format: 'pcap' | 'pcapng';
+  file_size_bytes: number;
+  packet_count: number;
+  captured_bytes: number;
+  original_bytes: number;
+  truncated_packets: number;
+  truncation_rate: number;
+  non_monotonic_timestamps: number;
+  missing_timestamps: number;
+  large_timestamp_gaps: number;
+  first_timestamp?: string;
+  last_timestamp?: string;
+  duration_seconds: number;
+  link_types: string[];
+  capabilities: string[];
+  limitations: CaptureQualityIssue[];
+  status: 'good' | 'degraded';
+}
+
 // Analysis results - matches the WebResultsWrapper + TriageReport structure
 export interface AnalysisResults {
   // Metadata from WebResultsWrapper
@@ -71,6 +114,7 @@ export interface AnalysisResults {
   duration: string;
   generated_at: string;
   capture_format?: string; // "pcap" or "pcapng"
+  capture_quality?: CaptureQualitySummary;
   
   // Risk assessment
   risk_score?: number;

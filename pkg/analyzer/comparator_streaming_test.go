@@ -277,19 +277,13 @@ func TestCompareStreaming_BFDControlPlane_Ignored(t *testing.T) {
 }
 
 func TestCompareStreaming_EmptyFiles(t *testing.T) {
-	// Both files empty → no errors, zero counts
+	// A PCAP header without packet records is structurally valid, but cannot
+	// substantiate claims about packet disappearance between capture points.
 	fileA := writeTempPCAP(t, buildTestPCAP(nil), "empty_a.pcap")
 	fileB := writeTempPCAP(t, buildTestPCAP(nil), "empty_b.pcap")
-
 	c := NewComparator(false)
-	report, err := c.CompareStreaming(fileA, fileB)
-	if err != nil {
-		t.Fatalf("CompareStreaming: %v", err)
-	}
-
-	if report.TotalPacketsA != 0 || report.TotalPacketsB != 0 {
-		t.Errorf("Empty files should have 0 packets, got A=%d B=%d",
-			report.TotalPacketsA, report.TotalPacketsB)
+	if _, err := c.CompareStreaming(fileA, fileB); err == nil {
+		t.Fatal("header-only comparison must fail closed rather than produce zero-packet report")
 	}
 }
 

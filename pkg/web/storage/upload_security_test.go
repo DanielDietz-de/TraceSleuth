@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/google/uuid"
@@ -158,5 +159,175 @@ func TestKeyLogMetadataRoundTripAndDeletion(t *testing.T) {
 		if _, err := os.Stat(path); !os.IsNotExist(err) {
 			t.Fatalf("sensitive file %s still exists: %v", path, err)
 		}
+	}
+}
+
+// Preflight may outlive a user cancellation. Progress, finalization and
+// failure handlers must never resurrect the cancelled terminal state.
+func TestCancellationCannotBeOverwrittenByLateProgress(t *testing.T) {
+	store := testUploadStorage(t)
+	id := uuid.NewString()
+	if _, err := store.CreateJob(id, "test.pcap", 4, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateProgress(id, 5, "Inspecting capture", 120); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CancelJob(id); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateProgress(id, 10, "Analyzing packets", 60); !errors.Is(err, ErrAnalysisCancelled) {
+		t.Errorf("progress revived a cancelled job: %v", err)
+	}
+	if err := store.CompleteJob(id, "", ""); !errors.Is(err, ErrAnalysisCancelled) {
+		t.Errorf("completion revived a cancelled job: %v", err)
+	}
+	if err := store.FailJob(id, "capture error"); !errors.Is(err, ErrAnalysisCancelled) {
+		t.Errorf("failure overwrote cancellation: %v", err)
+	}
+	job, err := store.GetJob(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != StatusCancelled || job.CurrentStep != "Analysis cancelled" {
+		t.Fatalf("cancelled job revived: %+v", job)
+	}
+}
+
+func TestConcurrentProgressCannotReviveCancellation(t *testing.T) {
+	store := testUploadStorage(t)
+	id := uuid.NewString()
+	if _, err := store.CreateJob(id, "test.pcap", 4, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateProgress(id, 0, "Initializing", 0); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := 0; i < 80; i++ {
+			_ = store.UpdateProgress(id, i, "Analyzing packets", 30)
+		}
+	}()
+	if err := store.CancelJob(id); err != nil {
+		t.Fatal(err)
+	}
+	wg.Wait()
+	job, err := store.GetJob(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != StatusCancelled {
+		t.Fatalf("concurrent update overwrote cancellation: %+v", job)
+	}
+}
+
+// The worker may still hold a timer tick after FailJob completes. Rejecting
+// that stale progress is essential to keep failed jobs terminal for WebSocket
+// consumers and to avoid permanently stuck "analyzing" jobs.
+func TestFailedJobCannotBeRevivedOrCompleted(t *testing.T) {
+	store := testUploadStorage(t)
+	id := uuid.NewString()
+	if _, err := store.CreateJob(id, "failed.pcap", 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.BeginAnalysis(id); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.FailJob(id, "parser failed"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpdateProgress(id, 96, "Late progress tick", 0); !errors.Is(err, ErrAnalysisFailed) {
+		t.Fatalf("terminal failed job accepted late progress: %v", err)
+	}
+	if err := store.CompleteJob(id, "bad.json", "bad.html"); !errors.Is(err, ErrAnalysisFailed) {
+		t.Fatalf("terminal failed job accepted completion: %v", err)
+	}
+	if _, err := store.BeginAnalysis(id); !errors.Is(err, ErrAnalysisNotStartable) {
+		t.Fatalf("terminal failed job can restart: %v", err)
+	}
+	j, err := store.GetJob(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j.Status != StatusFailed || j.Error != "parser failed" {
+		t.Fatalf("failed job was revived: %+v", j)
+	}
+}
+
+// Two simultaneous clients must never both reserve the same pending job.
+func TestBeginAnalysisIsAtomicAndCancelledJobsCannotRestart(t *testing.T) {
+	store := testUploadStorage(t)
+	id := uuid.NewString()
+	if _, err := store.CreateJob(id, "pending.pcap", 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	outcomes := make(chan error, 2)
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := store.BeginAnalysis(id)
+			outcomes <- err
+		}()
+	}
+	wg.Wait()
+	close(outcomes)
+	successes := 0
+	conflicts := 0
+	for err := range outcomes {
+		switch {
+		case err == nil:
+			successes++
+		case errors.Is(err, ErrAnalysisNotStartable):
+			conflicts++
+		default:
+			t.Fatalf("unexpected BeginAnalysis error: %v", err)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("expected one successful claim, one conflict; got %d, %d", successes, conflicts)
+	}
+	if err := store.CancelJob(id); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.BeginAnalysis(id); !errors.Is(err, ErrAnalysisNotStartable) {
+		t.Fatalf("cancelled job restarted: %v", err)
+	}
+	j, err := store.GetJob(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if j.Status != StatusCancelled {
+		t.Fatalf("cancelled job revived: %+v", j)
+	}
+}
+
+// A cancellation that arrives just after completion is not a server error;
+// the caller receives a typed conflict and the completed result stays intact.
+func TestCancelCompletedJobReturnsTypedConflict(t *testing.T) {
+	store := testUploadStorage(t)
+	id := uuid.NewString()
+	if _, err := store.CreateJob(id, "file.pcap", 1, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.BeginAnalysis(id); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CompleteJob(id, "done.json", "done.html"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.CancelJob(id); !errors.Is(err, ErrAnalysisAlreadyFinished) {
+		t.Fatalf("completed cancellation = %v, want typed conflict", err)
+	}
+	job, err := store.GetJob(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if job.Status != StatusCompleted {
+		t.Fatalf("completed job was altered by late cancellation: %+v", job)
 	}
 }

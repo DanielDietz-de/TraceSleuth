@@ -20,7 +20,7 @@ import (
 
 // Build-time variables — stamped via -ldflags "-X main.version=... -X main.buildCommit=... -X main.buildDate=..."
 var (
-	version     = "6.1.0.0"
+	version     = "dev" // stamped from root VERSION by the supported build pipeline
 	buildCommit = "unknown"
 	buildDate   = "unknown"
 )
@@ -29,15 +29,17 @@ var (
 var verbose *bool
 
 func main() {
-	// Define custom usage function
+	// Invalid flags or missing JSON arguments must not corrupt stdout.
+	// Explicit -help remains readable on stdout without JSON mode.
+	usageOutput := os.Stderr
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stdout, `SD-WAN Network Triage v%s
-Comprehensive PCAP analysis tool for SD-WAN networks with advanced security detection,
+		fmt.Fprintf(usageOutput, `TraceSleuth v%s
+Network packet-capture analysis with inherited traffic, protocol and security inspection,
 performance monitoring, and interactive D3.js visualizations.
 
 USAGE:
-    sdwan-triage [OPTIONS] <pcap_file>
-    sdwan-triage -web [-port PORT] [-no-browser]
+    tracesleuth [OPTIONS] <pcap_file>
+    tracesleuth -web [-port PORT] [-no-browser]
 
 OPTIONS:
   Output Formats:
@@ -63,12 +65,14 @@ OPTIONS:
     -app-identify          Enable deep application identification using heuristics
     -verbose               Enable verbose/debug output for troubleshooting
 
-  Network Features (require internet access):
-    -trace-path            Perform traceroute to discovered destinations (top 5 by anomalies)
-    -bgp-check             Check BGP routing data for potential hijack indicators
+  Network Features:
+    -trace-path            Traceroute to discovered destinations (requires internet)
+    -bgp-check             Check BGP routing data (requires internet)
+    -no-external-lookup    Disable external network lookups (also accepted in -compare)
 
   Multi-File Analysis:
-    -compare               Compare multiple PCAP files (provide multiple files as arguments)
+    -compare               Compare two PCAP files (console or -json output only;
+                           CSV/HTML/PDF and analysis-only filters are not supported)
 
   Web Application Mode:
     -web                   Start the interactive web application instead of CLI mode
@@ -134,114 +138,120 @@ FEATURES:
 EXAMPLES:
   Basic Usage:
     # Console output with summary
-    sdwan-triage capture.pcap
+    tracesleuth capture.pcap
 
     # Generate interactive HTML report (recommended)
-    sdwan-triage -html report.html capture.pcap
+    tracesleuth -html report.html capture.pcap
 
     # Export to JSON for automation
-    sdwan-triage -json capture.pcap > results.json
+    tracesleuth -json capture.pcap > results.json
 
     # Export to CSV for spreadsheet analysis
-    sdwan-triage -csv findings.csv capture.pcap
+    tracesleuth -csv findings.csv capture.pcap
 
     # Generate PDF report
-    sdwan-triage -pdf report.pdf capture.pcap
+    tracesleuth -pdf report.pdf capture.pcap
 
   Filtering Examples:
     # Analyze traffic from specific source IP
-    sdwan-triage -src-ip 192.168.1.100 capture.pcap
+    tracesleuth -src-ip 192.168.1.100 capture.pcap
 
     # Analyze traffic to specific destination
-    sdwan-triage -dst-ip 10.0.0.50 capture.pcap
+    tracesleuth -dst-ip 10.0.0.50 capture.pcap
 
     # Filter by service (port name or number)
-    sdwan-triage -service https capture.pcap
-    sdwan-triage -service 443 capture.pcap
-    sdwan-triage -service dns capture.pcap
+    tracesleuth -service https capture.pcap
+    tracesleuth -service 443 capture.pcap
+    tracesleuth -service dns capture.pcap
 
     # Filter by protocol
-    sdwan-triage -protocol tcp capture.pcap
-    sdwan-triage -protocol udp capture.pcap
+    tracesleuth -protocol tcp capture.pcap
+    tracesleuth -protocol udp capture.pcap
 
     # Combine multiple filters
-    sdwan-triage -src-ip 192.168.1.100 -service https -html report.html capture.pcap
+    tracesleuth -src-ip 192.168.1.100 -service https -html report.html capture.pcap
 
   Security Analysis:
     # Detect DDoS attacks and port scans
-    sdwan-triage -config security -html security-report.html capture.pcap
+    tracesleuth -config security -html security-report.html capture.pcap
 
     # Analyze suspicious traffic from specific IP
-    sdwan-triage -src-ip 203.0.113.50 -html scan-report.html suspicious.pcap
+    tracesleuth -src-ip 203.0.113.50 -html scan-report.html suspicious.pcap
 
     # Check for malware IOCs and TLS weaknesses
-    sdwan-triage -html threat-analysis.html malware-capture.pcap
+    tracesleuth -html threat-analysis.html malware-capture.pcap
 
   Performance Troubleshooting:
     # Analyze network performance with QoS
-    sdwan-triage -qos-analysis -html performance.html slow-network.pcap
+    tracesleuth -qos-analysis -html performance.html slow-network.pcap
 
     # Investigate TCP retransmissions
-    sdwan-triage -protocol tcp -html tcp-issues.html capture.pcap
+    tracesleuth -protocol tcp -html tcp-issues.html capture.pcap
 
     # Troubleshoot VoIP quality issues
-    sdwan-triage -service sip -html voip-quality.html call-problems.pcap
+    tracesleuth -service sip -html voip-quality.html call-problems.pcap
 
   TCP Handshake Analysis:
     # Display detailed handshake analysis with color-coded states
-    sdwan-triage --show-handshakes capture.pcap
+    tracesleuth --show-handshakes capture.pcap
 
     # Show only failed handshakes for troubleshooting
-    sdwan-triage --show-handshakes --failed-only capture.pcap
+    tracesleuth --show-handshakes --failed-only capture.pcap
 
     # Custom handshake timeout for slow networks (5 seconds)
-    sdwan-triage --handshake-timeout 5 capture.pcap
+    tracesleuth --handshake-timeout 5 capture.pcap
 
     # Generate HTML report with Wireshark filters for each flow
-    sdwan-triage -html handshake-report.html --show-handshakes capture.pcap
+    tracesleuth -html handshake-report.html --show-handshakes capture.pcap
 
   SD-WAN Analysis:
     # Detect SD-WAN vendor and analyze tunnels
-    sdwan-triage -html sdwan-report.html overlay-traffic.pcap
+    tracesleuth -html sdwan-report.html overlay-traffic.pcap
 
     # Analyze VXLAN overlay network
-    sdwan-triage -service 4789 -html vxlan-analysis.html capture.pcap
+    tracesleuth -service 4789 -html vxlan-analysis.html capture.pcap
 
     # Check IPsec tunnel traffic
-    sdwan-triage -protocol esp -html ipsec-report.html capture.pcap
+    tracesleuth -protocol esp -html ipsec-report.html capture.pcap
 
   LAN Protocol Analysis (VRRP, CDP, LLDP, HSRP, STP):
     # Re-analyze capture with VRRP detection
-    sdwan-triage analyze vrrp-capture.pcap
+    tracesleuth -json vrrp-capture.pcap
 
     # Check for VRRP flapping
-    sdwan-triage analyze vrrp-capture.pcap | jq '.lan_protocols.vrrp_sessions[] | select(.is_flapping == true)'
+    tracesleuth -json vrrp-capture.pcap | jq '.lan_protocols.vrrp_sessions[] | select(.is_flapping == true)'
 
     # View VRRP timeline events
-    sdwan-triage analyze vrrp-capture.pcap | jq '.timeline[] | select(.protocol == "VRRP")'
+    tracesleuth -json vrrp-capture.pcap | jq '.timeline[] | select(.protocol == "VRRP")'
 
     # Discover CDP devices
-    sdwan-triage -html report.html capture.pcap | jq '.lan_protocols.cdp_devices[]'
+    tracesleuth -json capture.pcap | jq '.lan_protocols.cdp_devices[]'
 
     # Check HSRP failover events
-    sdwan-triage analyze capture.pcap | jq '.timeline[] | select(.protocol == "HSRP")'
+    tracesleuth -json capture.pcap | jq '.timeline[] | select(.protocol == "HSRP")'
 
   Web Application Mode:
     # Start the interactive web UI (opens browser automatically)
-    sdwan-triage -web
+    tracesleuth -web
 
     # Start web UI on a custom port without auto-opening browser
-    sdwan-triage -web -port 9090 -no-browser
+    tracesleuth -web -port 9090 -no-browser
 
   Advanced Usage:
-    # Multiple output formats simultaneously
-    sdwan-triage -html report.html -json -csv findings.csv capture.pcap
+    # Generate HTML and CSV side by side
+    tracesleuth -html report.html -csv findings.csv capture.pcap
+
+    # Use -json by itself for a single machine-readable document
+    tracesleuth -json capture.pcap
+
+    # Comparison supports terminal text or -json only
+    tracesleuth -compare -json before.pcap after.pcap
 
     # Verbose output for debugging
-    sdwan-triage -verbose -html report.html capture.pcap
+    tracesleuth -verbose -html report.html capture.pcap
 
     # Custom configuration with filtering
-    sdwan-triage -config performance -dst-ip 10.0.0.1 -html report.html capture.pcap
+    tracesleuth -config performance -dst-ip 10.0.0.1 -html report.html capture.pcap
 
 OUTPUT FILES:
   HTML Report:  Interactive single-file report with D3.js visualizations
@@ -258,7 +268,7 @@ SUPPORTED PROTOCOLS:
   LAN:       VRRP, CDP, LLDP, HSRP, STP (with flapping detection)
 
 For more information and documentation:
-  https://github.com/gocisse/sdwan-triage
+  https://github.com/DanielDietz-de/TraceSleuth
 
 `, version)
 	}
@@ -298,6 +308,16 @@ For more information and documentation:
 
 	flag.Parse()
 
+	if *jsonOutput && (*webMode || *showHelp) {
+		fmt.Fprintln(os.Stderr, "Error: -json is not compatible with -web or -help")
+		os.Exit(2)
+	}
+
+	if *compareMode && *webMode {
+		fmt.Fprintln(os.Stderr, "Error: -compare cannot be used with -web")
+		os.Exit(2)
+	}
+
 	// Web application mode — start server and return
 	if *webMode {
 		intOpts := &IntegrationOptions{
@@ -311,11 +331,52 @@ For more information and documentation:
 
 	// Show help if requested or no arguments provided
 	if *showHelp || flag.NArg() < 1 {
+		if *showHelp && !*jsonOutput {
+			usageOutput = os.Stdout
+		}
 		flag.Usage()
 		if *showHelp {
 			os.Exit(0)
 		}
 		os.Exit(1)
+	}
+
+	// A machine-readable invocation must emit exactly one JSON document.
+	// Reject incompatible human-report/export flags rather than quietly
+	// contaminating stdout after the primary JSON result.
+	if *jsonOutput && (*csvOutput != "" || *htmlOutput != "" || *multiPageHTML != "" ||
+		*pdfOutput != "" || *simpleOutput || *tracePath || *bgpCheck ||
+		*appIdentify || *debugHTML) {
+		fmt.Fprintln(os.Stderr, "Error: -json cannot be combined with additional output, trace-path, BGP, app-identify, or debug-html options")
+		os.Exit(2)
+	}
+	// Comparison is a separate analysis mode, not an extra operation appended
+	// after the first capture report. Return exactly one comparison document.
+	if *compareMode {
+		// The comparison engine currently supports only comparison, JSON,
+		// verbose diagnostics and the no-external-lookup safety option.
+		// Reject every explicitly supplied analysis-only flag, including
+		// filters that would otherwise silently change the requested scope.
+		var unsupported []string
+		flag.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "compare", "json", "verbose", "no-external-lookup":
+				// Supported by comparison or safe to specify.
+			default:
+				unsupported = append(unsupported, "-"+f.Name)
+			}
+		})
+		if len(unsupported) != 0 {
+			fmt.Fprintf(os.Stderr, "Error: -compare does not support these options: %s\n",
+				strings.Join(unsupported, ", "))
+			os.Exit(2)
+		}
+		if flag.NArg() != 2 {
+			fmt.Fprintln(os.Stderr, "Error: -compare requires exactly two capture files")
+			os.Exit(2)
+		}
+		runPCAPComparison(flag.Arg(0), flag.Arg(1), *verbose, *jsonOutput, "")
+		return
 	}
 
 	// Create filter
@@ -389,17 +450,21 @@ For more information and documentation:
 		fmt.Fprintf(os.Stderr, "[DEBUG] Opening PCAP file: %s (size: %d bytes)\n", absPath, fileInfo.Size())
 	}
 
-	// Open capture file (auto-detects pcap vs pcapng)
-	capHandle, err := analyzer.OpenCapture(absPath)
+	// Capture trust/observability must be inspected before fault diagnosis.
+	quality, capHandle, err := analyzer.InspectCaptureAndOpen(absPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: Failed to read capture file '%s'\n", filepath.Base(absPath))
-		fmt.Fprintf(os.Stderr, "       Supported formats: .pcap and .pcapng\n")
-		if *verbose {
-			fmt.Fprintf(os.Stderr, "[DEBUG] OpenCapture error: %v\n", err)
-		}
+		fmt.Fprintf(os.Stderr, "Capture quality preflight failed: %v\n", err)
 		os.Exit(1)
 	}
 	defer capHandle.Close()
+	// os.Exit skips defers. Explicitly remove the sensitive working capture
+	// before exiting any error path after snapshot creation.
+	exitAfterCapture := func(code int) {
+		if closeErr := capHandle.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "Error cleaning private capture snapshot: %v\n", closeErr)
+		}
+		os.Exit(code)
+	}
 	reader := capHandle.Reader
 
 	if *verbose {
@@ -408,6 +473,7 @@ For more information and documentation:
 
 	// Initialize report and state
 	report := &models.TriageReport{
+		CaptureQuality:       quality,
 		ApplicationBreakdown: make(map[string]models.AppCategory),
 	}
 	state := models.NewAnalysisState()
@@ -416,7 +482,7 @@ For more information and documentation:
 	thresholds, err := config.LoadThresholds(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
+		exitAfterCapture(1)
 	}
 
 	// Create processor and analyze
@@ -435,12 +501,19 @@ For more information and documentation:
 		processor.SetHandshakeTimeout(time.Duration(*handshakeTimeout) * time.Second)
 	}
 
-	color.Cyan("SD-WAN Network Triage v%s", version)
-	color.Cyan("Analyzing: %s\n", filepath.Base(absPath))
+	// Machine-readable JSON must be the only content on stdout.
+	if !*jsonOutput {
+		color.Cyan("TraceSleuth v%s", version)
+		color.Cyan("Analyzing: %s\n", filepath.Base(absPath))
+	}
 
 	if err := processor.Process(reader, state, report, filter); err != nil {
 		fmt.Fprintf(os.Stderr, "Error processing PCAP: %v\n", err)
-		os.Exit(1)
+		exitAfterCapture(1)
+	}
+	if err := analyzer.VerifyCaptureHandle(capHandle, quality); err != nil {
+		fmt.Fprintf(os.Stderr, "Capture identity check failed after analysis: %v\n", err)
+		exitAfterCapture(1)
 	}
 
 	// Output results
@@ -449,7 +522,7 @@ For more information and documentation:
 		encoder.SetIndent("", "  ")
 		if err := encoder.Encode(report); err != nil {
 			fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
-			os.Exit(1)
+			exitAfterCapture(1)
 		}
 	} else if *simpleOutput {
 		// Print plain English report for non-technical users
@@ -575,43 +648,32 @@ For more information and documentation:
 		enhanceApplicationIdentification(report, *verbose)
 	}
 
-	// Compare mode - handled separately with multiple files
-	if *compareMode {
-		if flag.NArg() < 2 {
-			color.Yellow("⚠ Compare mode requires 2 PCAP files (LAN-side and WAN-side)")
-			color.Yellow("  Usage: sdwan-triage -compare lan.pcap wan.pcap")
-		} else {
-			color.Cyan("\n━━━ PCAP COMPARISON MODE ━━━")
-			runPCAPComparison(flag.Arg(0), flag.Arg(1), *verbose, *jsonOutput, *htmlOutput)
-		}
-	}
 }
 
 // runPCAPComparison performs a deep packet-level comparison between two PCAP files.
 func runPCAPComparison(fileA, fileB string, verboseMode bool, jsonOut bool, htmlFile string) {
 	comp := analyzer.NewComparator(verboseMode)
 
-	color.White("  LAN-side (A): %s", fileA)
-	color.White("  WAN-side (B): %s", fileB)
-	fmt.Println()
-
+	if !jsonOut {
+		color.White("  LAN-side (A): %s", fileA)
+		color.White("  WAN-side (B): %s", fileB)
+		fmt.Println()
+	}
 	report, err := comp.Compare(fileA, fileB)
 	if err != nil {
-		color.Red("  ✗ Comparison failed: %v", err)
+		fmt.Fprintf(os.Stderr, "Comparison failed: %v\n", err)
 		os.Exit(1)
 	}
-
-	// Print results
-	printComparisonReport(report)
-
-	// JSON output
 	if jsonOut {
 		encoder := json.NewEncoder(os.Stdout)
 		encoder.SetIndent("", "  ")
 		if err := encoder.Encode(report); err != nil {
 			fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
+			os.Exit(1)
 		}
+		return
 	}
+	printComparisonReport(report)
 }
 
 // printComparisonReport displays the comparison results in the terminal.

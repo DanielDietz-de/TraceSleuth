@@ -37,66 +37,77 @@ type PacketReader interface {
 	LinkType() layers.LinkType
 }
 
-// CaptureHandle bundles the reader, detected format, and the
-// underlying file so the caller can defer file.Close().
+// CaptureHandle owns the private decoder snapshot and the original opened
+// input descriptor. Both are closed, and the snapshot is removed, by Close.
+// SourceFile must never be used for decoding untrusted packet records.
 type CaptureHandle struct {
-	Reader PacketReader
-	Format CaptureFormat
-	File   *os.File
+	Reader       PacketReader
+	Format       CaptureFormat
+	File         *os.File
+	SourceFile   *os.File
+	snapshotPath string
 }
 
-// Close closes the underlying file.
-func (h *CaptureHandle) Close() error {
-	if h.File != nil {
-		return h.File.Close()
-	}
-	return nil
-}
-
-// OpenCapture opens a packet capture file, auto-detects the format
-// (pcap vs pcapng) via magic bytes, and returns the appropriate reader.
-//
-// The caller owns the CaptureHandle and must call h.Close() when done.
+// OpenCapture reads the capture into an immutable private working file before
+// passing any bytes to the parser. Its caller owns the returned handle.
 func OpenCapture(filePath string) (*CaptureHandle, error) {
-	f, err := os.Open(filePath)
+	h, _, _, err := openImmutableCapture(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open capture file: %w", err)
-	}
-
-	format, err := detectFormat(f)
-	if err != nil {
-		f.Close()
 		return nil, err
 	}
-
-	// Seek back to start so the reader sees the full file.
-	if _, err := f.Seek(0, io.SeekStart); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("failed to seek: %w", err)
+	parsed, err := openCaptureOnFile(h.File, pcapgo.NgReaderOptions{WantMixedLinkType: true})
+	if err != nil {
+		_ = h.Close()
+		return nil, err
 	}
+	h.Reader, h.Format = parsed.Reader, parsed.Format
+	return h, nil
+}
 
+// openCaptureOnFile resets a descriptor and recreates the packet reader.
+// This is used between preflight and detection so both passes use the SAME
+// open descriptor even when the original pathname is renamed/replaced.
+func openCaptureOnFile(f *os.File, options pcapgo.NgReaderOptions) (*CaptureHandle, error) {
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("failed to seek capture: %w", err)
+	}
+	format, err := detectFormat(f)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, fmt.Errorf("failed to rewind capture: %w", err)
+	}
 	handle := &CaptureHandle{File: f, Format: format}
-
-	switch format {
-	case FormatPCAPNG:
-		ngReader, err := pcapgo.NewNgReader(f, pcapgo.NgReaderOptions{
-			WantMixedLinkType: true,
-		})
+	if format == FormatPCAPNG {
+		// The decoder can mask truncated block tails as io.EOF. Validate the
+		// full block envelope before trusting any observed packet counts.
+		validatedSize, err := validatePCAPNGBlockFraming(f)
 		if err != nil {
-			f.Close()
+			return nil, fmt.Errorf("invalid PCAPNG block framing: %w", err)
+		}
+		// Never read beyond the validated byte extent if the original file
+		// is appended after preflight. Identity verification by the caller
+		// still rejects in-place edits and append races.
+		options.WantMixedLinkType = true
+		reader, err := pcapgo.NewNgReader(io.NewSectionReader(f, 0, validatedSize), options)
+		if err != nil {
 			return nil, fmt.Errorf("failed to create pcapng reader: %w", err)
 		}
-		handle.Reader = ngReader
-
-	default: // FormatPCAP
-		pcapReader, err := pcapgo.NewReader(f)
+		handle.Reader = reader
+	} else {
+		// Check every record's declared caplen and actual extent before the
+		// third-party PCAP reader can allocate untrusted packet buffers.
+		validatedSize, err := validateClassicPCAPFraming(f)
 		if err != nil {
-			f.Close()
+			return nil, fmt.Errorf("invalid PCAP framing: %w", err)
+		}
+		reader, err := pcapgo.NewReader(io.NewSectionReader(f, 0, validatedSize))
+		if err != nil {
 			return nil, fmt.Errorf("failed to create pcap reader: %w", err)
 		}
-		handle.Reader = pcapReader
+		handle.Reader = reader
 	}
-
 	return handle, nil
 }
 

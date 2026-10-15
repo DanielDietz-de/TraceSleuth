@@ -2,8 +2,8 @@ package models
 
 import (
 	"encoding/json"
-	"strings"
 	"math"
+	"strings"
 	"testing"
 	"time"
 )

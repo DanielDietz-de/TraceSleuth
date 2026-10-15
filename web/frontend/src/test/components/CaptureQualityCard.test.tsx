@@ -71,4 +71,19 @@ describe('capture quality panel', () => {
     expect(screen.getByText('Capture quality: Degraded')).toBeInTheDocument();
     expect(screen.getByText(/Packets were truncated/)).toBeInTheDocument();
   });
+  it('renders every interface-specific limitation even when codes repeat', () => {
+    render(<CaptureQualityCard quality={{
+      ...good,
+      status: 'degraded',
+      limitations: [
+        { code: 'capture_reported_drops', severity: 'warning', count: 4,
+          description: 'Capture section 0 interface 0 reported packet drops' },
+        { code: 'capture_reported_drops', severity: 'warning', count: 9,
+          description: 'Capture section 0 interface 1 reported packet drops' },
+      ],
+    }} />);
+    expect(screen.getByText(/Capture section 0 interface 0 reported packet drops/)).toBeInTheDocument();
+    expect(screen.getByText(/Capture section 0 interface 1 reported packet drops/)).toBeInTheDocument();
+  });
+
 });

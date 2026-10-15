@@ -104,7 +104,7 @@ for before, after in ((pcap, header_only), (header_only, pcap)):
     )
     assert rejected.returncode != 0, "header-only comparison unexpectedly succeeded"
     assert rejected.stdout == "", rejected.stdout
-    assert "no packet records" in rejected.stderr, rejected.stderr
+    assert ("no packet records" in rejected.stderr or "no packets present" in rejected.stderr), rejected.stderr
 
 # Only terminal text and JSON are currently supported for comparison mode.
 # Do not pretend a requested HTML/CSV/PDF export succeeded while ignoring it.

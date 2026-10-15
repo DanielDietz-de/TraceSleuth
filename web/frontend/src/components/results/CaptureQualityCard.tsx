@@ -47,8 +47,8 @@ export function CaptureQualityCard({ quality }: CaptureQualityCardProps) {
       )}
       {limitations.length > 0 && (
         <ul className="mt-3 space-y-1 text-sm text-amber-200">
-          {limitations.map(issue => (
-            <li key={issue.code}>
+          {limitations.map((issue, index) => (
+            <li key={issue.code + '-' + index}>
               {issue.description}
               {issue.count ? ' (observed ' + issue.count.toLocaleString() + ' times)' : ''}
             </li>

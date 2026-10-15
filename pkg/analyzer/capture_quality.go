@@ -65,19 +65,15 @@ func InspectCapture(path string) (*models.CaptureQuality, error) {
 // once more after detectors finish, in case the file was modified in place.
 // Callers own the returned handle and must close it.
 func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle, error) {
-	file, err := os.Open(path)
+	// Hash and parse only the private working snapshot. The concurrently
+	// mutable input descriptor is preserved solely for identity verification.
+	cap, digest, size, err := openImmutableCapture(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open capture preflight: %w", err)
 	}
-	hash := sha256.New()
-	size, err := io.Copy(hash, file)
-	if err != nil {
-		file.Close()
-		return nil, nil, fmt.Errorf("hash capture: %w", err)
-	}
-
+	file := cap.File
 	q := &models.CaptureQuality{
-		SHA256:        hex.EncodeToString(hash.Sum(nil)),
+		SHA256:        digest,
 		FileSizeBytes: size,
 		Status:        "good",
 		Interfaces:    make([]models.CaptureInterface, 0, 1),
@@ -87,13 +83,13 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 	}
 	linkTypeSet := map[string]bool{}
 	interfacePackets := map[int]uint64{}
-	interfaceDepth := map[int]uint32{}
+	interfaceTruncatedDepth := map[int]uint32{}
 	interfaceTruncated := map[int]bool{}
 	var usableEthernetDepth uint32
 	activeEthernetInterfaces := 0
 	// A single deeper interface must not conceal a shallow one. Capabilities
 	// require that EVERY active Ethernet capture point can observe the header.
-	observeEthernetDepth := func(sectionIndex, ifaceIndex int, snapLength, observedBytes uint32, truncated bool) {
+	observeEthernetDepth := func(sectionIndex, ifaceIndex int, snapLength, truncatedBytes uint32, truncated bool) {
 		// Capacity is determined by capture snaplen, not the length of ordinary
 		// traffic seen. A short untruncated frame does not prove a LACP frame
 		// would have been truncated. PCAPNG snaplen=0 means unlimited.
@@ -101,8 +97,8 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 		if depth == 0 {
 			depth = ^uint32(0)
 		}
-		if truncated && observedBytes < depth {
-			depth = observedBytes
+		if truncated && truncatedBytes < depth {
+			depth = truncatedBytes
 		}
 		if activeEthernetInterfaces == 0 || depth < usableEthernetDepth {
 			usableEthernetDepth = depth
@@ -137,7 +133,7 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 	finishSection := func(interfaces []pcapgo.NgInterface) {
 		for idx, iface := range interfaces {
 			if iface.LinkType == layers.LinkTypeEthernet && interfacePackets[idx] > 0 {
-				observeEthernetDepth(section, idx, iface.SnapLength, interfaceDepth[idx], interfaceTruncated[idx])
+				observeEthernetDepth(section, idx, iface.SnapLength, interfaceTruncatedDepth[idx], interfaceTruncated[idx])
 			}
 			info := models.CaptureInterface{
 				SectionIndex: section,
@@ -169,7 +165,7 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 		}
 		section++
 		interfacePackets = make(map[int]uint64)
-		interfaceDepth = make(map[int]uint32)
+		interfaceTruncatedDepth = make(map[int]uint32)
 		interfaceTruncated = make(map[int]bool)
 		statsObserved = make(map[int]bool)
 	}
@@ -184,13 +180,14 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 			statsObserved[index] = true
 		},
 	}
-	cap, err := openCaptureOnFile(file, opts)
+	parsed, err := openCaptureOnFile(file, opts)
 	if err != nil {
-		file.Close()
+		_ = cap.Close()
 		return nil, nil, fmt.Errorf("capture preflight: %w", err)
 	}
+	cap.Reader, cap.Format = parsed.Reader, parsed.Format
 	fail := func(err error) (*models.CaptureQuality, *CaptureHandle, error) {
-		cap.Close()
+		_ = cap.Close()
 		return nil, nil, err
 	}
 	q.Format = string(cap.Format)
@@ -202,19 +199,24 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 			break
 		}
 		if err != nil {
-			return fail(fmt.Errorf("capture contains malformed/truncated packet record after %d packets: %w", q.PacketCount, err))
+			// Preserve a safe packet index for both CLI and HTTP callers even
+			// when the shared preflight catches corruption before comparison.
+			// Never expose server-owned upload paths in the error text.
+			return fail(&MalformedCaptureRecordError{Index: int(q.PacketCount), Cause: err})
 		}
 		q.PacketCount++
 		q.CapturedBytes += uint64(len(data))
 		q.OriginalBytes += uint64(ci.Length)
 		if ci.CaptureLength < ci.Length {
 			q.TruncatedPackets++
+			// Only a genuinely truncated record limits inferred capture depth.
+			// An unrelated full-sized frame must not conceal a shallow drop.
+			if !interfaceTruncated[ci.InterfaceIndex] || uint32(len(data)) < interfaceTruncatedDepth[ci.InterfaceIndex] {
+				interfaceTruncatedDepth[ci.InterfaceIndex] = uint32(len(data))
+			}
 			interfaceTruncated[ci.InterfaceIndex] = true
 		}
 		interfacePackets[ci.InterfaceIndex]++
-		if uint32(len(data)) > interfaceDepth[ci.InterfaceIndex] {
-			interfaceDepth[ci.InterfaceIndex] = uint32(len(data))
-		}
 		linkType := cap.Reader.LinkType()
 		for _, extra := range ci.AncillaryData {
 			if lt, ok := extra.(layers.LinkType); ok {
@@ -263,7 +265,7 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 			return fail(err)
 		}
 		if classic.LinkType() == layers.LinkTypeEthernet && interfacePackets[0] > 0 {
-			observeEthernetDepth(0, 0, classic.Snaplen(), interfaceDepth[0], interfaceTruncated[0])
+			observeEthernetDepth(0, 0, classic.Snaplen(), interfaceTruncatedDepth[0], interfaceTruncated[0])
 		}
 		q.Interfaces = append(q.Interfaces, models.CaptureInterface{
 			SectionIndex: 0, Index: 0, LinkType: classic.LinkType().String(),
@@ -341,12 +343,13 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 	if err := VerifyCaptureHandle(cap, q); err != nil {
 		return fail(fmt.Errorf("capture changed during preflight: %w", err))
 	}
-	// The detection pass consumes the same descriptor, reset to byte zero.
-	cap, err = openCaptureOnFile(file, pcapgo.NgReaderOptions{WantMixedLinkType: true})
+	// Reset the decoder on exactly the same private, validated bytes.
+	// The original descriptor remains open only to detect source mutations.
+	parsed, err = openCaptureOnFile(file, pcapgo.NgReaderOptions{WantMixedLinkType: true})
 	if err != nil {
-		file.Close()
-		return nil, nil, fmt.Errorf("failed to rewind verified capture: %w", err)
+		return fail(fmt.Errorf("failed to rewind verified capture: %w", err))
 	}
+	cap.Reader, cap.Format = parsed.Reader, parsed.Format
 	return q, cap, nil
 }
 
@@ -366,7 +369,20 @@ func VerifyCaptureHandle(cap *CaptureHandle, quality *models.CaptureQuality) err
 		return fmt.Errorf("verify capture hash: %w", err)
 	}
 	if n != quality.FileSizeBytes || hex.EncodeToString(sum.Sum(nil)) != quality.SHA256 {
-		return fmt.Errorf("capture contents differ from preflight digest")
+		return fmt.Errorf("capture working copy differs from preflight digest")
+	}
+	if cap.SourceFile != nil {
+		if _, err := cap.SourceFile.Seek(0, io.SeekStart); err != nil {
+			return fmt.Errorf("rewind original capture for identity verification: %w", err)
+		}
+		originalHash := sha256.New()
+		originalSize, err := io.Copy(originalHash, cap.SourceFile)
+		if err != nil {
+			return fmt.Errorf("hash original capture: %w", err)
+		}
+		if originalSize != quality.FileSizeBytes || hex.EncodeToString(originalHash.Sum(nil)) != quality.SHA256 {
+			return fmt.Errorf("original capture changed during analysis")
+		}
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package analyzer
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
 	"os"
 	"path/filepath"
@@ -628,5 +629,107 @@ func TestInspectCaptureIdentifiesInterfaceThatReportedDrops(t *testing.T) {
 		quality.Interfaces[1].ReportedDrops == nil ||
 		*quality.Interfaces[1].ReportedDrops != 13 {
 		t.Fatalf("incorrect reported drop pointers: %+v", quality.Interfaces)
+	}
+}
+
+// A complete block envelope is insufficient if a packet-specific header is
+// too short or declares an impossible caplen. Both routes must reject the
+// tail, even after valid prior packet records, without allocating caplen.
+func TestInspectCaptureRejectsMalformedFramedPCAPNGPacketBlock(t *testing.T) {
+	corruptPath, clean := makeQualityFixture(t, true, []gopacket.CaptureInfo{{
+		Timestamp: time.Unix(1_000, 0), CaptureLength: 60, Length: 60,
+	}})
+	cleanPath, _ := makeQualityFixture(t, false, []gopacket.CaptureInfo{{
+		Timestamp: time.Unix(1_000, 0), CaptureLength: 60, Length: 60,
+	}})
+	shortEPB := make([]byte, 12)
+	binary.LittleEndian.PutUint32(shortEPB[0:4], 6)
+	binary.LittleEndian.PutUint32(shortEPB[4:8], 12)
+	binary.LittleEndian.PutUint32(shortEPB[8:12], 12)
+
+	missingPacketBytes := make([]byte, 32)
+	binary.LittleEndian.PutUint32(missingPacketBytes[0:4], 6)
+	binary.LittleEndian.PutUint32(missingPacketBytes[4:8], 32)
+	binary.LittleEndian.PutUint32(missingPacketBytes[20:24], 4)
+	binary.LittleEndian.PutUint32(missingPacketBytes[24:28], 4)
+	binary.LittleEndian.PutUint32(missingPacketBytes[28:32], 32)
+
+	oversizedPacket := make([]byte, 32)
+	binary.LittleEndian.PutUint32(oversizedPacket[0:4], 6)
+	binary.LittleEndian.PutUint32(oversizedPacket[4:8], 32)
+	binary.LittleEndian.PutUint32(oversizedPacket[20:24], ^uint32(0))
+	binary.LittleEndian.PutUint32(oversizedPacket[24:28], ^uint32(0))
+	binary.LittleEndian.PutUint32(oversizedPacket[28:32], 32)
+
+	for _, tc := range []struct {
+		name  string
+		block []byte
+	}{
+		{"short enhanced packet block", shortEPB},
+		{"packet bytes absent", missingPacketBytes},
+		{"oversized declared packet", oversizedPacket},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			input := append(append([]byte(nil), clean...), tc.block...)
+			if err := os.WriteFile(corruptPath, input, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := InspectCapture(corruptPath); err == nil {
+				t.Fatal("malformed framed PCAPNG packet was accepted")
+			}
+			comparator := NewComparator(false)
+			if _, err := comparator.Compare(corruptPath, cleanPath); err == nil {
+				t.Fatal("malformed PCAPNG tail yielded a valid comparison")
+			}
+		})
+	}
+}
+
+// A full jumbo frame on an interface does not undo evidence that a different
+// record was only captured through its Ethernet header.
+func TestInspectCaptureTruncatedDepthNotMaskedByFullSizedFrame(t *testing.T) {
+	for _, useNG := range []bool{false, true} {
+		t.Run(map[bool]string{false: "pcap", true: "pcapng"}[useNG], func(t *testing.T) {
+			var buffer bytes.Buffer
+			var write func(gopacket.CaptureInfo, []byte) error
+			var flush func() error
+			if useNG {
+				w, err := pcapgo.NewNgWriter(&buffer, layers.LinkTypeEthernet)
+				if err != nil {
+					t.Fatal(err)
+				}
+				write, flush = w.WritePacket, w.Flush
+			} else {
+				w := pcapgo.NewWriter(&buffer)
+				if err := w.WriteFileHeader(65535, layers.LinkTypeEthernet); err != nil {
+					t.Fatal(err)
+				}
+				write = w.WritePacket
+			}
+			for _, ci := range []gopacket.CaptureInfo{
+				{Timestamp: time.Unix(1, 0), CaptureLength: 1500, Length: 1500},
+				{Timestamp: time.Unix(2, 0), CaptureLength: 14, Length: 124},
+			} {
+				if err := write(ci, make([]byte, ci.CaptureLength)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if flush != nil {
+				if err := flush(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			path := filepath.Join(t.TempDir(), "mixed.pcap")
+			if err := os.WriteFile(path, buffer.Bytes(), 0600); err != nil {
+				t.Fatal(err)
+			}
+			quality, err := InspectCapture(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !reflect.DeepEqual(quality.Capabilities, []string{"ethernet"}) {
+				t.Fatalf("full-sized traffic masked shallow truncation: %+v", quality)
+			}
+		})
 	}
 }

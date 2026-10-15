@@ -37,34 +37,30 @@ type PacketReader interface {
 	LinkType() layers.LinkType
 }
 
-// CaptureHandle bundles the reader, detected format, and the
-// underlying file so the caller can defer file.Close().
+// CaptureHandle owns the private decoder snapshot and the original opened
+// input descriptor. Both are closed, and the snapshot is removed, by Close.
+// SourceFile must never be used for decoding untrusted packet records.
 type CaptureHandle struct {
-	Reader PacketReader
-	Format CaptureFormat
-	File   *os.File
+	Reader       PacketReader
+	Format       CaptureFormat
+	File         *os.File
+	SourceFile   *os.File
+	snapshotPath string
 }
 
-// Close closes the underlying file.
-func (h *CaptureHandle) Close() error {
-	if h.File != nil {
-		return h.File.Close()
-	}
-	return nil
-}
-
-// OpenCapture opens a packet capture file, auto-detects PCAP or PCAPNG,
-// and returns a reader on an owned file descriptor.
+// OpenCapture reads the capture into an immutable private working file before
+// passing any bytes to the parser. Its caller owns the returned handle.
 func OpenCapture(filePath string) (*CaptureHandle, error) {
-	f, err := os.Open(filePath)
+	h, _, _, err := openImmutableCapture(filePath)
 	if err != nil {
-		return nil, fmt.Errorf("failed to open capture file: %w", err)
-	}
-	h, err := openCaptureOnFile(f, pcapgo.NgReaderOptions{WantMixedLinkType: true})
-	if err != nil {
-		f.Close()
 		return nil, err
 	}
+	parsed, err := openCaptureOnFile(h.File, pcapgo.NgReaderOptions{WantMixedLinkType: true})
+	if err != nil {
+		_ = h.Close()
+		return nil, err
+	}
+	h.Reader, h.Format = parsed.Reader, parsed.Format
 	return h, nil
 }
 
@@ -86,17 +82,27 @@ func openCaptureOnFile(f *os.File, options pcapgo.NgReaderOptions) (*CaptureHand
 	if format == FormatPCAPNG {
 		// The decoder can mask truncated block tails as io.EOF. Validate the
 		// full block envelope before trusting any observed packet counts.
-		if err := validatePCAPNGBlockFraming(f); err != nil {
+		validatedSize, err := validatePCAPNGBlockFraming(f)
+		if err != nil {
 			return nil, fmt.Errorf("invalid PCAPNG block framing: %w", err)
 		}
+		// Never read beyond the validated byte extent if the original file
+		// is appended after preflight. Identity verification by the caller
+		// still rejects in-place edits and append races.
 		options.WantMixedLinkType = true
-		reader, err := pcapgo.NewNgReader(f, options)
+		reader, err := pcapgo.NewNgReader(io.NewSectionReader(f, 0, validatedSize), options)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create pcapng reader: %w", err)
 		}
 		handle.Reader = reader
 	} else {
-		reader, err := pcapgo.NewReader(f)
+		// Check every record's declared caplen and actual extent before the
+		// third-party PCAP reader can allocate untrusted packet buffers.
+		validatedSize, err := validateClassicPCAPFraming(f)
+		if err != nil {
+			return nil, fmt.Errorf("invalid PCAP framing: %w", err)
+		}
+		reader, err := pcapgo.NewReader(io.NewSectionReader(f, 0, validatedSize))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create pcap reader: %w", err)
 		}

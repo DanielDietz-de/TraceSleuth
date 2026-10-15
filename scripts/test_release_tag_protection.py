@@ -60,6 +60,65 @@ class TagProtectionContract(unittest.TestCase):
         ruleset = policy(conditions={"ref_name": {"include": ["~ALL"], "exclude": []}})
         self.assertTrue(module.protects_tag(ruleset, "v0.2.0"))
 
+    def test_redacted_bypass_actors_fail_closed(self):
+        ruleset = policy()
+        del ruleset["bypass_actors"]
+        self.assertFalse(module.protects_tag(ruleset, "v0.2.0"))
+        self.assertFalse(module.protects_tag(policy(bypass_actors=None), "v0.2.0"))
+        self.assertFalse(module.protects_tag(policy(bypass_actors={}), "v0.2.0"))
+
+    def test_bypass_actors_cannot_be_inferred_from_empty_metadata(self):
+        self.assertFalse(module.protects_tag(
+            policy(bypass_actors=[{"actor_type": "Integration", "actor_id": 123}]),
+            "v1.0.0",
+        ))
+
+    def test_recursive_ref_glob_does_not_cross_pathname(self):
+        for pattern in ("refs/**", "refs/tags/**", "refs/tags/v**",
+                        "refs/tags/v*/extra", "refs/tags/v[0-9]*"):
+            conditions = {"ref_name": {"include": [pattern], "exclude": []}}
+            self.assertFalse(
+                module.protects_tag(policy(conditions=conditions), "v0.2.0"),
+                pattern,
+            )
+
+    def test_exact_and_simple_tag_globs_allowed(self):
+        for pattern in ("refs/tags/v0.2.0", "refs/tags/v*", "refs/tags/v*.*.*"):
+            conditions = {"ref_name": {"include": [pattern], "exclude": []}}
+            self.assertTrue(
+                module.protects_tag(policy(conditions=conditions), "v0.2.0"),
+                pattern,
+            )
+
+    def test_ambiguous_exclusions_fail_closed(self):
+        for pattern in ("refs/**", "refs/tags/**", "refs/tags/v[0-9]*"):
+            conditions = {
+                "ref_name": {
+                    "include": ["refs/tags/v*"],
+                    "exclude": [pattern],
+                },
+            }
+            self.assertFalse(
+                module.protects_tag(policy(conditions=conditions), "v0.2.0"),
+                pattern,
+            )
+
+    def test_explicit_exclusion_prevents_release(self):
+        conditions = {
+            "ref_name": {
+                "include": ["refs/tags/v*"],
+                "exclude": ["refs/tags/v0.2.0"],
+            },
+        }
+        self.assertFalse(module.protects_tag(policy(conditions=conditions), "v0.2.0"))
+        self.assertTrue(module.protects_tag(policy(conditions=conditions), "v1.0.0"))
+
+    def test_malformed_glob_types_rejected(self):
+        for field in ("include", "exclude"):
+            bad = {"ref_name": {"include": ["refs/tags/v*"], "exclude": []}}
+            bad["ref_name"][field] = "refs/tags/v*"
+            self.assertFalse(module.protects_tag(policy(conditions=bad), "v0.2.0"))
+
     def test_empty_rule_is_rejected(self):
         self.assertFalse(module.protects_tag({}, "v0.2.0"))
 

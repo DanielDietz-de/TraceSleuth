@@ -1,6 +1,6 @@
 import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
-import { AboutPage } from '../../pages/AboutPage';
+import { AboutPage, isPrereleaseVersion } from '../../pages/AboutPage';
 
 describe('TraceSleuth About and attribution', () => {
   it('shows the authoritative repository VERSION instead of inherited UI metadata', () => {
@@ -21,9 +21,22 @@ describe('TraceSleuth About and attribution', () => {
       .toHaveAttribute('href', 'https://github.com/DanielDietz-de/TraceSleuth/blob/main/UPSTREAM.md');
   });
 
+  it.each([
+    '0.2.0', '0.9.0', '0.9.0-rc.1', '1.0.0-rc.1',
+    '2.0.0-beta.3+build.9',
+  ])('labels %s as prerelease', (version) => {
+    expect(isPrereleaseVersion(version)).toBe(true);
+  });
+
+  it.each([
+    '1.0.0', '1.0.0+build-experimental', '2.0.0',
+  ])('does not mistake stable %s for prerelease', (version) => {
+    expect(isPrereleaseVersion(version)).toBe(false);
+  });
+
   it('does not claim prerelease development builds are production ready', () => {
     render(<AboutPage />);
-    if (__TRACESLEUTH_VERSION__.startsWith('0.')) {
+    if (isPrereleaseVersion(__TRACESLEUTH_VERSION__)) {
       expect(screen.getByRole('status')).toHaveTextContent('not production-ready');
     } else {
       expect(screen.queryByRole('status')).not.toBeInTheDocument();

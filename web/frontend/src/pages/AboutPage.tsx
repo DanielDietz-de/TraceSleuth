@@ -3,8 +3,15 @@ import { BookOpen, ExternalLink, GitBranch, ShieldAlert } from 'lucide-react';
 const repositoryURL = 'https://github.com/DanielDietz-de/TraceSleuth';
 const upstreamURL = 'https://github.com/gocisse/sdwan-triage';
 
+// A SemVer prerelease suffix is independent of major version; build
+// metadata after '+' is not itself a prerelease.
+export function isPrereleaseVersion(version: string): boolean {
+  const beforeBuildMetadata = version.split('+', 1)[0];
+  return beforeBuildMetadata.startsWith('0.') || beforeBuildMetadata.includes('-');
+}
+
 export function AboutPage() {
-  const prerelease = __TRACESLEUTH_VERSION__.startsWith('0.');
+  const prerelease = isPrereleaseVersion(__TRACESLEUTH_VERSION__);
 
   return (
     <section className="mx-auto max-w-3xl space-y-6" aria-labelledby="about-title">
@@ -38,7 +45,7 @@ export function AboutPage() {
         {prerelease && (
           <p role="status" className="mt-4 flex items-start gap-2 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-100">
             <ShieldAlert aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />
-            Pre-1.0 development build: not production-ready. Features and detector
+            Development / prerelease build: not production-ready. Features and detector
             confidence models are still being validated.
           </p>
         )}

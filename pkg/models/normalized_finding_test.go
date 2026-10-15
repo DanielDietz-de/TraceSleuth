@@ -12,10 +12,11 @@ func validAlphaFinding(t *testing.T) DiagnosticFinding {
 	t.Helper()
 	first := time.Unix(1_000, 0).UTC()
 	last := first.Add(300 * time.Millisecond)
+	section := 0 // PCAPNG section and interface indexes both start at zero.
 	iface := 0 // Interface ID zero is valid and must not be omitted.
 	packet := PacketSourceReference{
 		CaptureID: "sha256:capture-a", PacketNumber: 1289,
-		Timestamp: &first, CaptureInterfaceID: &iface,
+		Timestamp: &first, CaptureSectionIndex: &section, CaptureInterfaceID: &iface,
 		Reason: "LACP partner changed", RelevantFields: map[string]string{
 			"lacp.partner_system_id": "00:11:22:33:44:55",
 		},
@@ -61,7 +62,7 @@ func TestNormalizedFindingValidatesEvidenceAndUncertainty(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, key := range []string{
-		"schema_version", "packet_references", "capture_interface_id",
+		"schema_version", "packet_references", "capture_section_index", "capture_interface_id",
 		"alternative_explanations", "capture_limitations",
 		"wireshark_filters", "recommended_validation",
 	} {
@@ -96,6 +97,11 @@ func TestNormalizedFindingValidationRejectsUnverifiableClaims(t *testing.T) {
 		}},
 		{"duplicate evidence ID", func(f *DiagnosticFinding) { f.Evidence[1].ID = f.Evidence[0].ID }},
 		{"no source packet number", func(f *DiagnosticFinding) { f.PacketReferences[0].PacketNumber = 0 }},
+		{"interface with unknown PCAPNG section", func(f *DiagnosticFinding) { f.PacketReferences[0].CaptureSectionIndex = nil }},
+		{"negative PCAPNG section", func(f *DiagnosticFinding) {
+			bad := -1
+			f.PacketReferences[0].CaptureSectionIndex = &bad
+		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			clone := base
@@ -206,6 +212,13 @@ func TestNormalizedFindingRejectsInvalidEvidenceAndBlankGuidance(t *testing.T) {
 	}{
 		{"empty packet evidence", func(f *DiagnosticFinding) {
 			f.Evidence[0].Packet = &PacketSourceReference{}
+		}},
+		{"whitespace-aliased packet evidence kind", func(f *DiagnosticFinding) {
+			f.Evidence[0].Kind = " packet"
+			f.Evidence[0].Packet = nil
+		}},
+		{"whitespace-aliased metric evidence kind", func(f *DiagnosticFinding) {
+			f.Evidence[1].Kind = "metric "
 		}},
 		{"negative packet evidence interface", func(f *DiagnosticFinding) {
 			negative := -1
@@ -355,6 +368,60 @@ func TestNormalizedFindingAcceptsTypedFiniteMetric(t *testing.T) {
 	}
 	if _, err := json.Marshal(f); err != nil {
 		t.Fatalf("valid normalized finding cannot be serialized: %v", err)
+	}
+}
+
+
+func TestStableFindingIDIgnoresDuplicatePacketAndTimezoneRendering(t *testing.T) {
+	utc := time.Date(2026, time.October, 15, 10, 0, 0, 123, time.UTC)
+	otherZone := utc.In(time.FixedZone("UTC+01", 3600))
+	section, iface := 0, 0
+	packet := PacketSourceReference{
+		CaptureID: "capture-a", PacketNumber: 42, Timestamp: &utc,
+		CaptureSectionIndex: &section, CaptureInterfaceID: &iface,
+		Reason: "first observation", RelevantFields: map[string]string{"lacp.actor": "a"},
+	}
+	baseline, err := StableFindingID("lacp.state", "1.0", "redundancy", []PacketSourceReference{packet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	duplicate := packet
+	duplicate.Reason = "translated or repeated description of the same packet"
+	withDuplicate, err := StableFindingID("lacp.state", "1.0", "redundancy", []PacketSourceReference{packet, duplicate})
+	if err != nil || baseline != withDuplicate {
+		t.Fatalf("duplicate packet altered stable identity: %q vs %q (%v)", baseline, withDuplicate, err)
+	}
+	duplicate.Timestamp = &otherZone
+	withTimezone, err := StableFindingID("lacp.state", "1.0", "redundancy", []PacketSourceReference{duplicate})
+	if err != nil || baseline != withTimezone {
+		t.Fatalf("equal timestamp instant altered stable identity: %q vs %q (%v)", baseline, withTimezone, err)
+	}
+}
+
+func TestPacketSourceReferenceIdentifiesPCAPNGSection(t *testing.T) {
+	sectionZero, sectionOne, iface := 0, 1, 0
+	packet := PacketSourceReference{
+		CaptureID: "capture-a", PacketNumber: 17, Reason: "observation",
+		CaptureSectionIndex: &sectionZero, CaptureInterfaceID: &iface,
+	}
+	if err := validPacketSource(packet); err != nil {
+		t.Fatalf("valid section 0/interface 0 was rejected: %v", err)
+	}
+	first, err := StableFindingID("stp.root", "1", "layer2", []PacketSourceReference{packet})
+	if err != nil {
+		t.Fatal(err)
+	}
+	packet.CaptureSectionIndex = &sectionOne
+	second, err := StableFindingID("stp.root", "1", "layer2", []PacketSourceReference{packet})
+	if err != nil || first == second {
+		t.Fatalf("reused interface ID in different section collapsed identity: %q, %q (%v)", first, second, err)
+	}
+	packet.CaptureInterfaceID = nil
+	if err := validPacketSource(packet); err == nil {
+		t.Fatal("section without interface accepted as precise provenance")
+	}
+	if _, err := StableFindingID("stp.root", "1", "layer2", []PacketSourceReference{packet}); err == nil {
+		t.Fatal("incomplete section/interface pair accepted by identity generator")
 	}
 }
 

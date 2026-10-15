@@ -92,13 +92,14 @@ func (c ExplainedConfidence) Calculated() (int, error) {
 	sum := c.Base
 	seen := make(map[string]struct{}, len(c.Adjustments))
 	for _, v := range c.Adjustments {
-		if strings.TrimSpace(v.EvidenceFamily) == "" || strings.TrimSpace(v.Reason) == "" {
+		family := strings.TrimSpace(v.EvidenceFamily)
+		if family == "" || strings.TrimSpace(v.Reason) == "" {
 			return 0, errors.New("confidence adjustment lacks evidence family or reason")
 		}
-		if _, exists := seen[v.EvidenceFamily]; exists {
-			return 0, fmt.Errorf("duplicate evidence family %q", v.EvidenceFamily)
+		if _, exists := seen[family]; exists {
+			return 0, fmt.Errorf("duplicate evidence family %q", family)
 		}
-		seen[v.EvidenceFamily] = struct{}{}
+		seen[family] = struct{}{}
 		if v.Delta < -100 || v.Delta > 100 {
 			return 0, fmt.Errorf("confidence contribution %d outside -100..100", v.Delta)
 		}
@@ -147,6 +148,14 @@ func validPacketSource(p PacketSourceReference) error {
 	if p.CaptureInterfaceID != nil && *p.CaptureInterfaceID < 0 {
 		return errors.New("negative capture interface identifier")
 	}
+	if p.Timestamp != nil {
+		if p.Timestamp.IsZero() {
+			return errors.New("packet source has a zero timestamp")
+		}
+		if _, err := p.Timestamp.MarshalJSON(); err != nil {
+			return fmt.Errorf("packet source timestamp is not JSON-serializable: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -171,8 +180,9 @@ func (f DiagnosticFinding) Validate() error {
 	if f.SchemaVersion != NormalizedFindingSchemaVersion {
 		return fmt.Errorf("unsupported normalized finding schema %q", f.SchemaVersion)
 	}
-	if f.DetectorID == "" || f.DetectorVersion == "" ||
-		f.ID == "" || f.Title == "" || f.Summary == "" || f.Category == "" {
+	if strings.TrimSpace(f.DetectorID) == "" || strings.TrimSpace(f.DetectorVersion) == "" ||
+		strings.TrimSpace(f.ID) == "" || strings.TrimSpace(f.Title) == "" ||
+		strings.TrimSpace(f.Summary) == "" || strings.TrimSpace(f.Category) == "" {
 		return errors.New("finding lacks identity, detector version, or description")
 	}
 	switch f.Severity {
@@ -192,53 +202,78 @@ func (f DiagnosticFinding) Validate() error {
 	if score != f.Confidence.Final {
 		return fmt.Errorf("unexplained confidence: calculated %d, stored %d", score, f.Confidence.Final)
 	}
-	if f.FirstSeen == nil || f.LastSeen == nil || f.LastSeen.Before(*f.FirstSeen) {
+	if f.FirstSeen == nil || f.LastSeen == nil || f.FirstSeen.IsZero() ||
+		f.LastSeen.IsZero() || f.LastSeen.Before(*f.FirstSeen) {
 		return errors.New("finding lacks a valid observed time range")
+	}
+	// A valid finding must be serializable; Go rejects RFC3339 years outside
+	// 0000..9999 and invalid timezone offsets during JSON marshaling.
+	for _, timestamp := range []*time.Time{f.FirstSeen, f.LastSeen} {
+		if _, err := timestamp.MarshalJSON(); err != nil {
+			return fmt.Errorf("finding time range is not JSON-serializable: %w", err)
+		}
 	}
 	if len(f.Evidence) == 0 {
 		return errors.New("finding lacks evidence")
 	}
-	evidenceIDs := make(map[string]struct{}, len(f.Evidence))
+	evidenceByID := make(map[string]FindingEvidence, len(f.Evidence))
 	for _, ev := range f.Evidence {
-		if ev.ID == "" || ev.Kind == "" || ev.Description == "" {
+		if strings.TrimSpace(ev.ID) == "" || strings.TrimSpace(ev.Kind) == "" ||
+			strings.TrimSpace(ev.Description) == "" {
 			return errors.New("evidence lacks identity, type or description")
 		}
-		if _, exists := evidenceIDs[ev.ID]; exists {
+		if _, exists := evidenceByID[ev.ID]; exists {
 			return fmt.Errorf("duplicate evidence ID %q", ev.ID)
 		}
-		evidenceIDs[ev.ID] = struct{}{}
+		if ev.Value != nil && (math.IsNaN(*ev.Value) || math.IsInf(*ev.Value, 0)) {
+			return fmt.Errorf("evidence %q contains a non-finite value", ev.ID)
+		}
+		if ev.Packet != nil {
+			if err := validPacketSource(*ev.Packet); err != nil {
+				return fmt.Errorf("invalid packet evidence %q: %w", ev.ID, err)
+			}
+		}
 		switch ev.Kind {
 		case "packet":
 			if ev.Packet == nil {
 				return errors.New("packet evidence without packet source reference")
 			}
-			if err := validPacketSource(*ev.Packet); err != nil {
-				return fmt.Errorf("invalid packet evidence %q: %w", ev.ID, err)
-			}
 		case "metric":
-			if ev.Value == nil || math.IsNaN(*ev.Value) || math.IsInf(*ev.Value, 0) ||
-				strings.TrimSpace(ev.Unit) == "" {
+			if ev.Value == nil || strings.TrimSpace(ev.Unit) == "" {
 				return fmt.Errorf("metric evidence %q lacks a finite value and unit", ev.ID)
 			}
-		default:
-			if ev.Value != nil && (math.IsNaN(*ev.Value) || math.IsInf(*ev.Value, 0)) {
-				return fmt.Errorf("evidence %q contains a non-finite value", ev.ID)
-			}
 		}
+		evidenceByID[ev.ID] = ev
 	}
 	usedConfidenceEvidence := make(map[string]struct{}, len(f.Evidence))
+	// A single capture/packet observation is not independent evidence merely
+	// because it was assigned different IDs or described by different fields.
+	type packetIdentity struct {
+		captureID    string
+		packetNumber uint64
+	}
+	usedPacketEvidence := make(map[packetIdentity]string, len(f.Evidence))
 	for _, adj := range f.Confidence.Adjustments {
 		if len(adj.EvidenceIDs) == 0 {
 			return fmt.Errorf("confidence family %q lacks supporting evidence IDs", adj.EvidenceFamily)
 		}
+		family := strings.TrimSpace(adj.EvidenceFamily)
 		for _, id := range adj.EvidenceIDs {
-			if _, ok := evidenceIDs[id]; !ok {
+			ev, ok := evidenceByID[id]
+			if !ok {
 				return fmt.Errorf("confidence adjustment references unknown evidence %q", id)
 			}
 			if _, used := usedConfidenceEvidence[id]; used {
 				return fmt.Errorf("confidence reuses evidence %q across contributions", id)
 			}
 			usedConfidenceEvidence[id] = struct{}{}
+			if ev.Packet != nil {
+				key := packetIdentity{captureID: ev.Packet.CaptureID, packetNumber: ev.Packet.PacketNumber}
+				if previousFamily, used := usedPacketEvidence[key]; used && previousFamily != family {
+					return fmt.Errorf("packet %d from capture %q is counted in multiple confidence families", key.packetNumber, key.captureID)
+				}
+				usedPacketEvidence[key] = family
+			}
 		}
 	}
 	if len(f.PacketReferences) == 0 || !hasNonemptyEntries(f.WiresharkFilters) ||
@@ -254,6 +289,15 @@ func (f DiagnosticFinding) Validate() error {
 		if !hasNonemptyEntries(f.AlternativeExplanations) || !hasNonemptyEntries(f.CaptureLimitations) {
 			return errors.New("inferred finding omits substantive alternatives or capture limitations")
 		}
+	}
+	// IDs are content-derived; changing the detector/category/packet
+	// identity after assigning an ID must invalidate the finding.
+	expectedID, err := StableFindingID(f.DetectorID, f.DetectorVersion, f.Category, f.PacketReferences)
+	if err != nil {
+		return fmt.Errorf("invalid finding identity: %w", err)
+	}
+	if f.ID != expectedID {
+		return errors.New("finding ID does not match detector, category and packet identity")
 	}
 	return nil
 }

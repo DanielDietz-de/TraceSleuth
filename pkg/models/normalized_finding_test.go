@@ -281,3 +281,92 @@ func TestStableFindingIDTotalOrderWhenPacketIDsEqual(t *testing.T) {
 		t.Fatalf("reordering equal-number packet refs changed identity: %s != %s (%v)", first, second, err)
 	}
 }
+
+// New independent-review regression cases keep experimental findings JSON
+// serializable and prevent correlated packet evidence inflating confidence.
+func TestNormalizedFindingRejectsAliasedPacketsAndInvalidValues(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*DiagnosticFinding)
+	}{
+		{"non-finite packet evidence NaN", func(f *DiagnosticFinding) {
+			v := math.NaN()
+			f.Evidence[0].Value = &v
+		}},
+		{"non-finite packet evidence infinity", func(f *DiagnosticFinding) {
+			v := math.Inf(-1)
+			f.Evidence[0].Value = &v
+		}},
+		{"whitespace-only evidence ID", func(f *DiagnosticFinding) {
+			f.Evidence[0].ID = "  \t "
+		}},
+		{"whitespace-only evidence kind", func(f *DiagnosticFinding) {
+			f.Evidence[0].Kind = " "
+		}},
+		{"whitespace-only evidence description", func(f *DiagnosticFinding) {
+			f.Evidence[0].Description = " \t "
+		}},
+		{"packet observation aliased across families", func(f *DiagnosticFinding) {
+			alias := *f.Evidence[0].Packet
+			alias.Reason = "same source packet presented as another observation"
+			alias.RelevantFields = map[string]string{"alternate": "same packet"}
+			f.Evidence[1] = FindingEvidence{
+				ID: "evidence-2", Kind: "packet", Description: "Aliased packet", Packet: &alias,
+			}
+		}},
+		{"category changed after ID creation", func(f *DiagnosticFinding) {
+			f.Category = "transport"
+		}},
+		{"packet number changed after ID creation", func(f *DiagnosticFinding) {
+			f.PacketReferences[0].PacketNumber++
+		}},
+		{"out-of-range temporal JSON year", func(f *DiagnosticFinding) {
+			start := time.Date(10000, time.January, 1, 0, 0, 0, 0, time.UTC)
+			end := start.Add(time.Second)
+			f.FirstSeen, f.LastSeen = &start, &end
+		}},
+		{"zero observation times", func(f *DiagnosticFinding) {
+			zero := time.Time{}
+			f.FirstSeen, f.LastSeen = &zero, &zero
+		}},
+		{"out-of-range packet timestamp", func(f *DiagnosticFinding) {
+			bad := time.Date(10000, time.January, 1, 0, 0, 0, 0, time.UTC)
+			f.PacketReferences[0].Timestamp = &bad
+		}},
+	}{
+		t.Run(tc.name, func(t *testing.T) {
+			f := validAlphaFinding(t)
+			tc.edit(&f)
+			if err := f.Validate(); err == nil {
+				t.Fatalf("%s incorrectly passed finding validation", tc.name)
+			}
+		})
+	}
+}
+
+func TestNormalizedFindingAcceptsTypedFiniteMetric(t *testing.T) {
+	f := validAlphaFinding(t)
+	value := 3.5
+	f.Evidence[1] = FindingEvidence{
+		ID: "evidence-2", Kind: "metric", Description: "Observed frame gap", Value: &value, Unit: "ms",
+	}
+	if err := f.Validate(); err != nil {
+		t.Fatalf("finite metric evidence was rejected: %v", err)
+	}
+	if _, err := json.Marshal(f); err != nil {
+		t.Fatalf("valid normalized finding cannot be serialized: %v", err)
+	}
+}
+
+func TestNormalizedConfidenceRejectsWhitespaceAliasedFamily(t *testing.T) {
+	conf := ExplainedConfidence{
+		Base: 50,
+		Adjustments: []ConfidenceAdjustment{
+			{EvidenceFamily: "observed_state", Delta: 15, Reason: "first observation"},
+			{EvidenceFamily: " observed_state ", Delta: 15, Reason: "alias"},
+		},
+	}
+	if _, err := conf.Calculated(); err == nil {
+		t.Fatal("whitespace alias permitted duplicate confidence family")
+	}
+}

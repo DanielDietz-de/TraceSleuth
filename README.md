@@ -155,6 +155,14 @@ A degraded capture status describes limitations of the capture **only**;
 it is not proof that the live network has a fault. Empty and structurally
 truncated captures fail preflight rather than producing misleading findings.
 
+For security, PCAPNG metadata options are validated before decoding:
+zero-length non-terminating options are rejected to prevent stale parser
+buffer reuse, and no more than 4 KiB of zero padding is allowed after an
+option terminator. This strict rule can reject otherwise readable but
+nonconforming captures; repair the capture at its source instead of
+turning off the parser safeguard. It is not a substitute for the
+unimplemented global analysis quotas and fuzzing programme.
+
 **Not yet implemented:** capture duplication/SPAN differentiation,
 detection-confidence penalties, full per-packet evidence provenance,
 generalized multi-capture trust, and validated Layer-2 loop inference.

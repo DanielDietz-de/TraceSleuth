@@ -199,7 +199,7 @@ export async function uploadFile(
             response.details
           ));
         }
-      } catch (parseErr) {
+      } catch {
         console.error(`[Upload] Failed to parse response:`, xhr.responseText.substring(0, 200));
         reject(new ApiError(
           `Server returned invalid JSON (HTTP ${xhr.status}). Response: ${xhr.responseText.substring(0, 100)}`,

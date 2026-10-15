@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gin-gonic/gin"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/web/storage"
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 )
 

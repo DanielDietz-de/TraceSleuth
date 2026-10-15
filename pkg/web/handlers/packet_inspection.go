@@ -10,10 +10,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/analyzer"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/web/storage"
+	"github.com/gin-gonic/gin"
 	"github.com/google/gopacket"
 )
 

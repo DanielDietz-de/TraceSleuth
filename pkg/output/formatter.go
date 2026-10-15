@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/fatih/color"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
+	"github.com/fatih/color"
 )
 
 // PrintExecutiveSummary prints a high-level summary of findings

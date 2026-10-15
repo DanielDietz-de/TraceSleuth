@@ -9,9 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/analyzer"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/web/storage"
+	"github.com/gin-gonic/gin"
 )
 
 // ComparisonHandlers provides endpoints for PCAP comparison mode

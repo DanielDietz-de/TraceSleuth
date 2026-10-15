@@ -8,8 +8,8 @@ import (
 	"strings"
 	"unicode"
 
-	"github.com/gin-gonic/gin"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/web/storage"
+	"github.com/gin-gonic/gin"
 )
 
 // Parsing into memory is capped separately from the total HTTP body. Multipart

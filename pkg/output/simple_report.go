@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/fatih/color"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
+	"github.com/fatih/color"
 )
 
 // GenerateSimpleReport generates a plain English report for non-technical users

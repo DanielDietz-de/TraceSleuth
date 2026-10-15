@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/fatih/color"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/analyzer"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/config"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/output"
+	"github.com/fatih/color"
 )
 
 // Build-time variables — stamped via -ldflags "-X main.version=... -X main.buildCommit=... -X main.buildDate=..."

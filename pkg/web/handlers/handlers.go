@@ -14,11 +14,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gin-gonic/gin"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/integration"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/intelligence"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/metrics"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/web/storage"
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )

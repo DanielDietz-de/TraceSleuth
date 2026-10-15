@@ -16,8 +16,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/gin-contrib/cors"
-	"github.com/gin-gonic/gin"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/database"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/integration"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/intelligence"
@@ -25,6 +23,8 @@ import (
 	"github.com/DanielDietz-de/TraceSleuth/pkg/middleware"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/web/handlers"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/web/storage"
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
 )
 
 const (

@@ -22,8 +22,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/gin-gonic/gin"
 	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
+	"github.com/gin-gonic/gin"
 )
 
 // SearchMatch describes one matching packet plus a short preview of where

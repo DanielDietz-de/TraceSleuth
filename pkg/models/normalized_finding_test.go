@@ -13,7 +13,7 @@ func validAlphaFinding(t *testing.T) DiagnosticFinding {
 	first := time.Unix(1_000, 0).UTC()
 	last := first.Add(300 * time.Millisecond)
 	section := 0 // PCAPNG section and interface indexes both start at zero.
-	iface := 0 // Interface ID zero is valid and must not be omitted.
+	iface := 0   // Interface ID zero is valid and must not be omitted.
 	packet := PacketSourceReference{
 		CaptureID: "sha256:capture-a", PacketNumber: 1289,
 		Timestamp: &first, CaptureSectionIndex: &section, CaptureInterfaceID: &iface,
@@ -370,7 +370,6 @@ func TestNormalizedFindingAcceptsTypedFiniteMetric(t *testing.T) {
 		t.Fatalf("valid normalized finding cannot be serialized: %v", err)
 	}
 }
-
 
 func TestStableFindingIDIgnoresDuplicatePacketAndTimezoneRendering(t *testing.T) {
 	utc := time.Date(2026, time.October, 15, 10, 0, 0, 123, time.UTC)

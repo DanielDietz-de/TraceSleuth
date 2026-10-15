@@ -41,14 +41,14 @@ const (
 // Optional fields use pointers so interface index zero is distinct from
 // unknown and missing timestamps cannot be fabricated as zero-time.
 type PacketSourceReference struct {
-	CaptureID          string            `json:"capture_id"`
-	PacketNumber       uint64            `json:"packet_number"`
-	Timestamp          *time.Time        `json:"timestamp,omitempty"`
+	CaptureID           string            `json:"capture_id"`
+	PacketNumber        uint64            `json:"packet_number"`
+	Timestamp           *time.Time        `json:"timestamp,omitempty"`
 	CaptureSectionIndex *int              `json:"capture_section_index,omitempty"`
-	CaptureInterfaceID *int              `json:"capture_interface_id,omitempty"`
-	CapturePointLabel  string            `json:"capture_point_label,omitempty"`
-	Reason             string            `json:"reason"`
-	RelevantFields     map[string]string `json:"relevant_fields,omitempty"`
+	CaptureInterfaceID  *int              `json:"capture_interface_id,omitempty"`
+	CapturePointLabel   string            `json:"capture_point_label,omitempty"`
+	Reason              string            `json:"reason"`
+	RelevantFields      map[string]string `json:"relevant_fields,omitempty"`
 }
 
 // FindingEvidence is a typed and traceable observation, not copied payload
@@ -327,12 +327,12 @@ func StableFindingID(detectorID, detectorVersion, category string, refs []Packet
 	// JSON sorts map keys; sorting the serialized references also handles
 	// otherwise-equal packet IDs with different observed protocol fields.
 	type sourceIdentity struct {
-		CaptureID          string            `json:"capture_id"`
-		PacketNumber       uint64            `json:"packet_number"`
-		Timestamp          *time.Time        `json:"timestamp,omitempty"`
+		CaptureID           string            `json:"capture_id"`
+		PacketNumber        uint64            `json:"packet_number"`
+		Timestamp           *time.Time        `json:"timestamp,omitempty"`
 		CaptureSectionIndex *int              `json:"capture_section_index,omitempty"`
-		CaptureInterfaceID *int              `json:"capture_interface_id,omitempty"`
-		RelevantFields     map[string]string `json:"relevant_fields,omitempty"`
+		CaptureInterfaceID  *int              `json:"capture_interface_id,omitempty"`
+		RelevantFields      map[string]string `json:"relevant_fields,omitempty"`
 	}
 	canonical := make([]string, 0, len(refs))
 	seenCanonical := make(map[string]struct{}, len(refs))
@@ -354,7 +354,7 @@ func StableFindingID(detectorID, detectorVersion, category string, refs []Packet
 			CaptureID: p.CaptureID, PacketNumber: p.PacketNumber,
 			Timestamp: timestamp, CaptureSectionIndex: p.CaptureSectionIndex,
 			CaptureInterfaceID: p.CaptureInterfaceID,
-			RelevantFields: p.RelevantFields,
+			RelevantFields:     p.RelevantFields,
 		})
 		if err != nil {
 			return "", fmt.Errorf("marshal packet identity: %w", err)

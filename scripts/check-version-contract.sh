@@ -23,7 +23,13 @@ grep -Fq 'The repository-root `VERSION` file is the authoritative source' docs/p
 grep -Fq 'The current version is declared by the repository-root `VERSION` file' docs/project/RELEASE_PROCESS.md || fail 'RELEASE_PROCESS.md must derive current-release status from VERSION (not a stale hard-coded version)'
 grep -Fq 'BINARY_NAME  := tracesleuth' Makefile || fail 'Makefile does not build the tracesleuth product artifact'
 grep -Fq 'VERSION      := $(shell tr -d' Makefile || fail 'Makefile does not derive VERSION from the root VERSION file'
-grep -Fq 'BINARY_NAME: tracesleuth' .github/workflows/release.yml || fail 'release workflow artifact identity is not tracesleuth'
+grep -Fq 'BINARY_NAME: tracesleuth' .github/workflows/validated-release.yml || fail 'validated release workflow artifact identity is not tracesleuth'
+grep -Fq 'check-legacy-release-disabled.py' .github/workflows/validated-release.yml || fail 'validated publisher must check historical release workflow state'
+grep -Fq 'gh release create' .github/workflows/validated-release.yml || fail 'validated publisher must build the release artifact'
+grep -Fq 'retired:' .github/workflows/release.yml || fail 'historical release workflow must remain a retired stub'
+if grep -Fq 'gh release create' .github/workflows/release.yml || grep -Fq 'tags:' .github/workflows/release.yml; then
+  fail 'historical release workflow must have no tag-push trigger or publishing command'
+fi
 grep -Fq "version-${version}-blue" README.md || fail "README version badge is not aligned with VERSION=$version"
 
 # During the bootstrap phase a few legacy runtime surfaces intentionally remain,

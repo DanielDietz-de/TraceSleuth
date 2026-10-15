@@ -91,16 +91,14 @@ func TestCompareStreamingRejectsInPlaceAppend(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	frame := make([]byte, 60)
-	frame[12], frame[13] = 0x08, 0x00
-	frame[14] = 0x45 // IPv4 version, IHL
-	frame[17] = 46   // IP total length
-	frame[22], frame[23] = 64, 17
-	copy(frame[26:30], []byte{192, 0, 2, 1})
-	copy(frame[30:34], []byte{192, 0, 2, 2})
-	frame[34], frame[35] = 0x1f, 0x90
-	frame[36], frame[37] = 0, 53
-	frame[39] = 26 // UDP header + payload length
+	// Reuse a packet already accepted by the comparator's golden PCAP
+	// fixtures. The test requires a valid decoded IP flow to trigger the
+	// append inside the per-packet callback rather than at an artificial seam.
+	validPCAP := buildTestPCAP([]testPacket{{
+		srcIP: lanIP, dstIP: wanIP, srcPort: 55555, dstPort: 443,
+		proto: 6, ttl: 64, seqNum: 1000, tcpFlag: 0x02,
+	}})
+	frame := validPCAP[24+16:]
 	if err := writer.WritePacket(gopacket.CaptureInfo{
 		Timestamp: time.Unix(1_000, 0), CaptureLength: len(frame), Length: len(frame),
 	}, frame); err != nil {
@@ -130,7 +128,7 @@ func TestCompareStreamingRejectsInPlaceAppend(t *testing.T) {
 		}
 	})
 	if calls != 1 {
-		t.Fatalf("expected comparator to stream one IPv4 packet, got %d", calls)
+		t.Fatalf("expected comparator to stream one IPv4 packet, got %d; stream error: %v", calls, err)
 	}
 	if err == nil || !strings.Contains(err.Error(), "capture changed") {
 		t.Fatalf("in-place append was not rejected: %v", err)

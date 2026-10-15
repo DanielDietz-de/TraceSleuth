@@ -4,6 +4,7 @@ import { Routes, Route } from 'react-router-dom';
 import { Layout } from './components';
 import { HomePage, AnalysisPage, ResultsPage, HistoryPage, ComparePage } from './pages';
 import { LoginPage } from './pages/LoginPage';
+import { AboutPage } from './pages/AboutPage';
 import { useAuth } from './auth/AuthContext';
 
 function App() {
@@ -22,6 +23,7 @@ function App() {
         <Route path="/results/:id" element={<ResultsPage />} />
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/compare" element={<ComparePage />} />
+        <Route path="/about" element={<AboutPage />} />
       </Routes>
     </Layout>
   );

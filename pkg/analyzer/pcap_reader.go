@@ -100,7 +100,13 @@ func openCaptureOnFile(f *os.File, options pcapgo.NgReaderOptions) (*CaptureHand
 		}
 		handle.Reader = reader
 	} else {
-		reader, err := pcapgo.NewReader(f)
+		// Check every record's declared caplen and actual extent before the
+		// third-party PCAP reader can allocate untrusted packet buffers.
+		validatedSize, err := validateClassicPCAPFraming(f)
+		if err != nil {
+			return nil, fmt.Errorf("invalid PCAP framing: %w", err)
+		}
+		reader, err := pcapgo.NewReader(io.NewSectionReader(f, 0, validatedSize))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create pcap reader: %w", err)
 		}

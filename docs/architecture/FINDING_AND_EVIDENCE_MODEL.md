@@ -59,7 +59,7 @@ references
 tags
 ```
 
-The exact Go types and JSON schema will be versioned when implemented.
+An **experimental**, non-public Go contract is implemented in `pkg/models/normalized_finding.go` with schema marker `0.1.0-alpha`. It validates packet provenance, time ranges, explicit evidence and explainable confidence and exposes deterministic instance IDs. This is only the first Phase 3 infrastructure increment: no priority detector currently emits the normalized structure as its primary output, the legacy report remains authoritative, and neither JSON/API stability nor full detector migration is claimed. The acceptance criteria for Phase 3 remain open.
 
 ## Stable IDs
 

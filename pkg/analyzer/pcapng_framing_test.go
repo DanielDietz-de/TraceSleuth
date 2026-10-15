@@ -120,7 +120,7 @@ func TestPCAPNGFramingRejectsTimestampResolutionOverflow(t *testing.T) {
 	path, valid := makeQualityFixture(t, true, []gopacket.CaptureInfo{{
 		Timestamp: time.Unix(1_000, 0), CaptureLength: 60, Length: 60,
 	}})
-	for _, value := range []byte{0x14, 0x40, 0xc0, 0xff} {
+	for _, value := range []byte{0x14, 0x40, 0x8a, 0x9d, 0xc0, 0xff} {
 		t.Run(fmt.Sprintf("resolution-0x%02x", value), func(t *testing.T) {
 			// New IDB: 8-byte fixed header, if_tsresol option (code 9),
 			// 1-byte value with 3 bytes of required padding.

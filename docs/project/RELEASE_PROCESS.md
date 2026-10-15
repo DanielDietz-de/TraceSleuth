@@ -166,8 +166,15 @@ a guarded publish from the default branch. It accepts exactly one of:
 
 - a push of a matching `vX.Y.Z` tag;
 - a GitHub Actions manual dispatch on `main` supplying the exact `VERSION`;
+  manual dispatch targeting a tag or another branch is explicitly denied;
 - a reviewed merge to `main` whose commit subject begins
   `release: vX.Y.Z`, with X.Y.Z exactly matching `VERSION`.
+
+The per-PR `scripts/test-release-context.sh` matrix validates authorized and
+rejected event, ref and version combinations against the **same shell helper**
+used by the release workflow; the workflow job condition independently enforces
+the event/ref restriction. In particular, a tag selected in the manual Actions
+UI is not equivalent to a pushed tag.
 
 The release job does not publish until **both CI and Security have succeeded on
 the exact release commit SHA** (not the pull-request head or another branch).

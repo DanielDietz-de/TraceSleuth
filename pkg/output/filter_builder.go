@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gocisse/sdwan-triage/pkg/analyzer"
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/analyzer"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 )
 
 // SmartFilter contains context-aware Wireshark filters

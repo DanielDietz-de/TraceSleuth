@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gocisse/sdwan-triage/web/backend/storage"
+	"github.com/DanielDietz-de/TraceSleuth/web/backend/storage"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )

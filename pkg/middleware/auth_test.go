@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gocisse/sdwan-triage/pkg/database"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/database"
 )
 
 func TestNewAuthConfigUsesIndependentRandomSecrets(t *testing.T) {

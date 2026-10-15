@@ -10,10 +10,10 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/gocisse/sdwan-triage/pkg/analyzer"
-	"github.com/gocisse/sdwan-triage/pkg/models"
-	"github.com/gocisse/sdwan-triage/pkg/output"
-	"github.com/gocisse/sdwan-triage/web/backend/storage"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/analyzer"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/output"
+	"github.com/DanielDietz-de/TraceSleuth/web/backend/storage"
 )
 
 // WebResultsWrapper wraps TriageReport with metadata fields expected by the frontend

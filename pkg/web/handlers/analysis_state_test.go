@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gocisse/sdwan-triage/pkg/web/storage"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/web/storage"
 	"github.com/google/uuid"
 )
 

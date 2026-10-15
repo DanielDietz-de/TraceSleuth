@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 )
 
 // TimelineEvent represents an event on the timeline

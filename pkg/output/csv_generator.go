@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 )
 
 // CSVExportResult contains info about generated CSV files

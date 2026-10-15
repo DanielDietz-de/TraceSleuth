@@ -23,7 +23,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 )
 
 // SearchMatch describes one matching packet plus a short preview of where

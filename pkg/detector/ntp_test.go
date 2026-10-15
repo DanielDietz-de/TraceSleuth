@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 )
 
 func TestNTPAnalyzer_AmplificationDetection(t *testing.T) {

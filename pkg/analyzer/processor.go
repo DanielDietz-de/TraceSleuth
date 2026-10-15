@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gocisse/sdwan-triage/pkg/config"
-	"github.com/gocisse/sdwan-triage/pkg/detector"
-	"github.com/gocisse/sdwan-triage/pkg/detectors"
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/config"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/detector"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/detectors"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )

@@ -10,8 +10,8 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gocisse/sdwan-triage/pkg/analyzer"
-	"github.com/gocisse/sdwan-triage/pkg/web/storage"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/analyzer"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/web/storage"
 )
 
 // ComparisonHandlers provides endpoints for PCAP comparison mode

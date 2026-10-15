@@ -1,4 +1,4 @@
-module github.com/gocisse/sdwan-triage
+module github.com/DanielDietz-de/TraceSleuth
 
 go 1.26.9
 

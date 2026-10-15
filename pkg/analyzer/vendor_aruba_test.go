@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 )
 
 // makeArubaStream builds a minimal StreamData on an Aruba EdgeConnect port

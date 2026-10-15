@@ -12,10 +12,10 @@ import (
 	"time"
 
 	"github.com/fatih/color"
-	"github.com/gocisse/sdwan-triage/pkg/analyzer"
-	"github.com/gocisse/sdwan-triage/pkg/config"
-	"github.com/gocisse/sdwan-triage/pkg/models"
-	"github.com/gocisse/sdwan-triage/pkg/output"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/analyzer"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/config"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/output"
 )
 
 // Build-time variables — stamped via -ldflags "-X main.version=... -X main.buildCommit=... -X main.buildDate=..."

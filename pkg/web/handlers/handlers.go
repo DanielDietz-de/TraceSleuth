@@ -15,10 +15,10 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gocisse/sdwan-triage/pkg/integration"
-	"github.com/gocisse/sdwan-triage/pkg/intelligence"
-	"github.com/gocisse/sdwan-triage/pkg/metrics"
-	"github.com/gocisse/sdwan-triage/pkg/web/storage"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/integration"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/intelligence"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/metrics"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/web/storage"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 )

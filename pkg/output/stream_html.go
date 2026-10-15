@@ -6,8 +6,8 @@ import (
 	"html/template"
 	"strings"
 
-	"github.com/gocisse/sdwan-triage/pkg/analyzer"
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/analyzer"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 )
 
 // StreamSectionHTML generates the HTML for the stream reassembly section

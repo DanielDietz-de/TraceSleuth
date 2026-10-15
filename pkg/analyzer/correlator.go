@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 )
 
 // UnderlayOverlayCorrelator links underlay events (BGP route changes, link failures)

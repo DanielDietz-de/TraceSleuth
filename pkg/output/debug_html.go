@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 )
 
 // GenerateDebugHTML generates a simplified HTML report for debugging purposes

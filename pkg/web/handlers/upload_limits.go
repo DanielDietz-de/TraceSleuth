@@ -9,7 +9,7 @@ import (
 	"unicode"
 
 	"github.com/gin-gonic/gin"
-	"github.com/gocisse/sdwan-triage/pkg/web/storage"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/web/storage"
 )
 
 // Parsing into memory is capped separately from the total HTTP body. Multipart

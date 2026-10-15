@@ -319,7 +319,17 @@ func (c *Comparator) streamFile(filePath string, onPacket func(*packetMeta)) (in
 			return index, &MalformedCaptureRecordError{Index: index, Cause: err}
 		}
 
-		pkt := gopacket.NewPacket(data, reader.LinkType(), gopacket.Lazy)
+		// Mixed-link-type PCAPNG embeds the packet's actual link type in
+		// AncillaryData. The NgReader's default link type may be unknown:
+		// decoding all such records as a single link type silently drops
+		// IP conversations and produces misleading comparison results.
+		linkType := reader.LinkType()
+		for _, extra := range ci.AncillaryData {
+			if lt, ok := extra.(layers.LinkType); ok {
+				linkType = lt
+			}
+		}
+		pkt := gopacket.NewPacket(data, linkType, gopacket.Lazy)
 		if pkt == nil {
 			index++
 			continue

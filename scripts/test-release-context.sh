@@ -41,7 +41,7 @@ assert_context() {
   printf 'release authorization: %-28s %s\n' "$test_name" "$should_pass"
 }
 
-assert_context tag_push yes push "refs/tags/$expected" '' ''
+assert_context tag_push_denied no push "refs/tags/$expected" '' ''
 assert_context dispatch_main yes workflow_dispatch refs/heads/main "$version" ''
 assert_context release_main yes push refs/heads/main '' "release: $expected"
 assert_context release_main_detail yes push refs/heads/main '' "release: $expected extra release detail"

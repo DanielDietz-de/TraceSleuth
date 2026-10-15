@@ -72,6 +72,20 @@ func validatePCAPNGOptions(file *os.File, start, end int64, order binary.ByteOrd
 		if length < minLength {
 			return fmt.Errorf("PCAPNG option %d in block %d is too short at byte %d", code, blockType, pos)
 		}
+		if blockType == 1 && code == 9 {
+			// The pinned gopacket NgReader computes 2^exponent or
+			// 10^exponent in uint64; values beyond the representable range
+			// wrap its time denominator to zero and panic on division.
+			var encoded [1]byte
+			if _, err := file.ReadAt(encoded[:], pos+4); err != nil {
+				return fmt.Errorf("read PCAPNG timestamp resolution: %w", err)
+			}
+			exponent := encoded[0] & 0x7f
+			if (encoded[0]&0x80 != 0 && exponent > 63) ||
+				(encoded[0]&0x80 == 0 && exponent > 19) {
+				return fmt.Errorf("PCAPNG timestamp resolution exceeds safe uint64 precision at byte %d", pos)
+			}
+		}
 		pos += 4 + int64(padded)
 	}
 	return nil
@@ -173,6 +187,20 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 			captured := uint64(order.Uint32(fixedPacketHeader[20:24]))
 			original := uint64(order.Uint32(fixedPacketHeader[24:28]))
 			padded := (captured + 3) &^ uint64(3)
+			// The obsolete Packet Block uses a uint16 interface number,
+			// while the Enhanced Packet Block uses uint32 at the same offset.
+			var interfaceID uint32
+			if blockType == 2 {
+				interfaceID = uint32(order.Uint16(fixedPacketHeader[8:10]))
+			} else {
+				interfaceID = order.Uint32(fixedPacketHeader[8:12])
+			}
+			if uint64(interfaceID) >= uint64(len(snaplens)) {
+				return 0, fmt.Errorf("PCAPNG packet references unknown interface at byte %d", offset)
+			}
+			if snap := snaplens[interfaceID]; snap != 0 && captured > uint64(snap) {
+				return 0, fmt.Errorf("PCAPNG captured packet exceeds interface snaplen at byte %d", offset)
+			}
 			if captured > maxPCAPNGPacketBytes || captured > original ||
 				uint64(blockLength) < 32+padded {
 				return 0, fmt.Errorf("invalid PCAPNG packet length at byte %d: captured=%d original=%d block=%d", offset, captured, original, blockLength)

@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -78,5 +79,60 @@ func TestCompareStreamingRejectsPartialPCAPNGTail(t *testing.T) {
 		if _, err := comparator.Compare(pair[0], pair[1]); err == nil {
 			t.Fatalf("PCAPNG with partial block yielded plausible comparison for %v", pair)
 		}
+	}
+}
+
+// An append between validated PCAPNG preflight and comparison EOF must never
+// produce a plausible partial result. The reader is size-bounded and the
+// final descriptor hash invalidates the concurrent mutation.
+func TestCompareStreamingRejectsInPlaceAppend(t *testing.T) {
+	var buffer bytes.Buffer
+	writer, err := pcapgo.NewNgWriter(&buffer, layers.LinkTypeEthernet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame := make([]byte, 60)
+	frame[12], frame[13] = 0x08, 0x00
+	frame[14] = 0x45 // IPv4 version, IHL
+	frame[17] = 46   // IP total length
+	frame[22], frame[23] = 64, 17
+	copy(frame[26:30], []byte{192, 0, 2, 1})
+	copy(frame[30:34], []byte{192, 0, 2, 2})
+	frame[34], frame[35] = 0x1f, 0x90
+	frame[36], frame[37] = 0, 53
+	frame[39] = 26 // UDP header + payload length
+	if err := writer.WritePacket(gopacket.CaptureInfo{
+		Timestamp: time.Unix(1_000, 0), CaptureLength: len(frame), Length: len(frame),
+	}, frame); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "append-while-comparing.pcapng")
+	if err := os.WriteFile(path, buffer.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	calls := 0
+	comparator := NewComparator(false)
+	_, err = comparator.streamFile(path, func(_ *packetMeta) {
+		calls++
+		upload, openErr := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		if _, writeErr := upload.Write([]byte{0x06, 0, 0}); writeErr != nil {
+			upload.Close()
+			t.Fatal(writeErr)
+		}
+		if closeErr := upload.Close(); closeErr != nil {
+			t.Fatal(closeErr)
+		}
+	})
+	if calls != 1 {
+		t.Fatalf("expected comparator to stream one IPv4 packet, got %d", calls)
+	}
+	if err == nil || !strings.Contains(err.Error(), "capture changed") {
+		t.Fatalf("in-place append was not rejected: %v", err)
 	}
 }

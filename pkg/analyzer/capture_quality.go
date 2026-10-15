@@ -202,7 +202,10 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 			break
 		}
 		if err != nil {
-			return fail(fmt.Errorf("capture contains malformed/truncated packet record after %d packets: %w", q.PacketCount, err))
+			// Preserve a safe packet index for both CLI and HTTP callers even
+			// when the shared preflight catches corruption before comparison.
+			// Never expose server-owned upload paths in the error text.
+			return fail(&MalformedCaptureRecordError{Index: int(q.PacketCount), Cause: err})
 		}
 		q.PacketCount++
 		q.CapturedBytes += uint64(len(data))

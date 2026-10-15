@@ -446,9 +446,9 @@ func TestInspectCaptureRejectsPartialPCAPNGTailAfterValidPacket(t *testing.T) {
 		Timestamp: time.Unix(1_000, 0), CaptureLength: 60, Length: 60,
 	}})
 	cases := map[string][]byte{
-		"partial header": append(append([]byte(nil), clean...), 0x06, 0, 0, 0, 0x40, 0),
+		"partial header":      append(append([]byte(nil), clean...), 0x06, 0, 0, 0, 0x40, 0),
 		"partial packet body": append(append([]byte(nil), clean...), 0x06, 0, 0, 0, 0x40, 0, 0, 0),
-		"bad closing length": append([]byte(nil), clean...),
+		"bad closing length":  append([]byte(nil), clean...),
 	}
 	// The last four bytes are the ending length of a complete PCAPNG block.
 	cases["bad closing length"][len(clean)-4] ^= 1

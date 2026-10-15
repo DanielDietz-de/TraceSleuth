@@ -1,0 +1,61 @@
+name: One-time frontend dependency lockfile refresh
+
+# This is a temporary maintainer-controlled workflow. It runs only when
+# this file is added/edited on the isolated PR branch, never on main.
+on:
+  push:
+    branches:
+      - ci/validated-prerelease-publishing
+    paths:
+      - .github/workflows/npm-lock-refresh.yml
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    name: Refresh vulnerable transitive npm dependencies
+    if: github.repository == 'DanielDietz-de/TraceSleuth'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact working branch
+        uses: actions/checkout@v7
+        with:
+          ref: ci/validated-prerelease-publishing
+          persist-credentials: true
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Apply safe semver-compatible vulnerability repairs
+        working-directory: web/frontend
+        shell: bash
+        run: |
+          set -uo pipefail
+          # Lockfile-only: never execute third-party install/build scripts while
+          # this workflow holds the scoped repository push credential.
+          npm audit fix --package-lock-only --ignore-scripts
+          result=$?
+          echo "npm audit fix exit: $result"
+          if git diff --quiet -- package-lock.json; then
+            echo 'No lockfile changes were available.'
+          else
+            echo 'Lockfile changes prepared; final security gates remain mandatory.'
+          fi
+
+      - name: Commit the refreshed lockfile for separate CI review
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- web/frontend/package-lock.json; then
+            echo 'No new lockfile changes to commit.'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add web/frontend/package-lock.json
+          git commit -m 'fix(deps): refresh vulnerable frontend transitive lockfile'
+          git push origin HEAD:ci/validated-prerelease-publishing

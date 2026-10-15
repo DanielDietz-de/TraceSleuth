@@ -1,0 +1,45 @@
+name: One-time nested Go module reconciliation
+on:
+  push:
+    branches:
+      - feat/tracesleuth-module-migration
+    paths:
+      - .github/workflows/nested-tidy-once.yml
+permissions:
+  contents: write
+jobs:
+  tidy:
+    if: github.repository == 'DanielDietz-de/TraceSleuth'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v7
+        with:
+          ref: feat/tracesleuth-module-migration
+          persist-credentials: true
+      - name: Go toolchain
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Reconcile nested Go module metadata
+        shell: bash
+        working-directory: web/backend
+        run: |
+          set -euo pipefail
+          go mod tidy
+          go list -m
+          git diff --stat -- go.mod go.sum
+      - name: Commit only nested Go module metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git diff --quiet -- web/backend/go.mod web/backend/go.sum; then
+            echo 'Nested module already tidy.'
+            exit 0
+          fi
+          git add web/backend/go.mod web/backend/go.sum
+          git commit -m 'chore(go): reconcile nested backend module deps with canonical root'
+          git push origin HEAD:feat/tracesleuth-module-migration

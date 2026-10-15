@@ -6,6 +6,12 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
 
 ## [Unreleased]
 
+### Added (unreleased)
+
+- Add a signed-in About view with upstream MIT attribution, non-endorsement disclosure, provenance/license links and explicit pre-1.0 status.
+- Inject the browser-visible product version from the authoritative root VERSION during Vite builds, replacing inherited frontend version labels.
+- Replace inherited application shell title and HTML metadata with TraceSleuth while preserving historical upstream attribution.
+
 ### Planned
 
 - Complete remaining product-identity migration for inherited runtime source paths, frontend strings, API metadata, and configuration/storage names.

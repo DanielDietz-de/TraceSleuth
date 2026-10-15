@@ -33,6 +33,9 @@ func validateClassicPCAPFraming(file *os.File) (int64, error) {
 		return 0, fmt.Errorf("invalid classic PCAP magic 0x%08x", magic)
 	}
 	snaplen := uint64(order.Uint32(header[16:20]))
+	if snaplen == 0 {
+		return 0, fmt.Errorf("classic PCAP global header has an invalid zero snaplen")
+	}
 	// PCAP encodes fractional seconds in microseconds or nanoseconds.
 	// Out-of-range fractions get normalized or overflowed by the
 	// third-party reader, corrupting observed timing while appearing valid.

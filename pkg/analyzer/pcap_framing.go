@@ -34,21 +34,23 @@ func validateClassicPCAPFraming(file *os.File) (int64, error) {
 	}
 	snaplen := uint64(order.Uint32(header[16:20]))
 	var record [16]byte
+	packetIndex := 0
 	for offset := int64(24); offset < size; {
 		if size-offset < int64(len(record)) {
-			return 0, fmt.Errorf("truncated classic PCAP packet header at byte %d", offset)
+			return 0, &MalformedCaptureRecordError{Index: packetIndex, Cause: fmt.Errorf("truncated classic PCAP packet header at byte %d", offset)}
 		}
 		if _, err := file.ReadAt(record[:], offset); err != nil {
-			return 0, fmt.Errorf("read PCAP record at byte %d: %w", offset, err)
+			return 0, &MalformedCaptureRecordError{Index: packetIndex, Cause: fmt.Errorf("read PCAP record at byte %d: %w", offset, err)}
 		}
 		captured := uint64(order.Uint32(record[8:12]))
 		original := uint64(order.Uint32(record[12:16]))
 		if captured > maxPCAPNGPacketBytes || captured > original ||
 			(snaplen != 0 && captured > snaplen) ||
 			captured > uint64(size-offset-16) {
-			return 0, fmt.Errorf("invalid classic PCAP capture length at byte %d: captured=%d original=%d", offset, captured, original)
+			return 0, &MalformedCaptureRecordError{Index: packetIndex, Cause: fmt.Errorf("invalid classic PCAP capture length at byte %d: captured=%d original=%d", offset, captured, original)}
 		}
 		offset += 16 + int64(captured)
+		packetIndex++
 	}
 	return size, nil
 }

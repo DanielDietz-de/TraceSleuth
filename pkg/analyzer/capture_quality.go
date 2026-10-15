@@ -65,19 +65,15 @@ func InspectCapture(path string) (*models.CaptureQuality, error) {
 // once more after detectors finish, in case the file was modified in place.
 // Callers own the returned handle and must close it.
 func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle, error) {
-	file, err := os.Open(path)
+	// Hash and parse only the private working snapshot. The concurrently
+	// mutable input descriptor is preserved solely for identity verification.
+	cap, digest, size, err := openImmutableCapture(path)
 	if err != nil {
 		return nil, nil, fmt.Errorf("open capture preflight: %w", err)
 	}
-	hash := sha256.New()
-	size, err := io.Copy(hash, file)
-	if err != nil {
-		file.Close()
-		return nil, nil, fmt.Errorf("hash capture: %w", err)
-	}
-
+	file := cap.File
 	q := &models.CaptureQuality{
-		SHA256:        hex.EncodeToString(hash.Sum(nil)),
+		SHA256:        digest,
 		FileSizeBytes: size,
 		Status:        "good",
 		Interfaces:    make([]models.CaptureInterface, 0, 1),
@@ -184,13 +180,14 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 			statsObserved[index] = true
 		},
 	}
-	cap, err := openCaptureOnFile(file, opts)
+	parsed, err := openCaptureOnFile(file, opts)
 	if err != nil {
-		file.Close()
+		_ = cap.Close()
 		return nil, nil, fmt.Errorf("capture preflight: %w", err)
 	}
+	cap.Reader, cap.Format = parsed.Reader, parsed.Format
 	fail := func(err error) (*models.CaptureQuality, *CaptureHandle, error) {
-		cap.Close()
+		_ = cap.Close()
 		return nil, nil, err
 	}
 	q.Format = string(cap.Format)
@@ -346,12 +343,13 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 	if err := VerifyCaptureHandle(cap, q); err != nil {
 		return fail(fmt.Errorf("capture changed during preflight: %w", err))
 	}
-	// The detection pass consumes the same descriptor, reset to byte zero.
-	cap, err = openCaptureOnFile(file, pcapgo.NgReaderOptions{WantMixedLinkType: true})
+	// Reset the decoder on exactly the same private, validated bytes.
+	// The original descriptor remains open only to detect source mutations.
+	parsed, err = openCaptureOnFile(file, pcapgo.NgReaderOptions{WantMixedLinkType: true})
 	if err != nil {
-		file.Close()
-		return nil, nil, fmt.Errorf("failed to rewind verified capture: %w", err)
+		return fail(fmt.Errorf("failed to rewind verified capture: %w", err))
 	}
+	cap.Reader, cap.Format = parsed.Reader, parsed.Format
 	return q, cap, nil
 }
 
@@ -371,7 +369,20 @@ func VerifyCaptureHandle(cap *CaptureHandle, quality *models.CaptureQuality) err
 		return fmt.Errorf("verify capture hash: %w", err)
 	}
 	if n != quality.FileSizeBytes || hex.EncodeToString(sum.Sum(nil)) != quality.SHA256 {
-		return fmt.Errorf("capture contents differ from preflight digest")
+		return fmt.Errorf("capture working copy differs from preflight digest")
+	}
+	if cap.SourceFile != nil {
+		if _, err := cap.SourceFile.Seek(0, io.SeekStart); err != nil {
+			return fmt.Errorf("rewind original capture for identity verification: %w", err)
+		}
+		originalHash := sha256.New()
+		originalSize, err := io.Copy(originalHash, cap.SourceFile)
+		if err != nil {
+			return fmt.Errorf("hash original capture: %w", err)
+		}
+		if originalSize != quality.FileSizeBytes || hex.EncodeToString(originalHash.Sum(nil)) != quality.SHA256 {
+			return fmt.Errorf("original capture changed during analysis")
+		}
 	}
 	return nil
 }

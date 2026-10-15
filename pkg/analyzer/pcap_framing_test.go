@@ -44,6 +44,20 @@ func TestClassicPCAPFramingRejectsUnsafeCaptureLength(t *testing.T) {
 	}
 }
 
+func TestClassicPCAPFramingRejectsZeroSnaplen(t *testing.T) {
+	path, data := makeQualityFixture(t, false, []gopacket.CaptureInfo{{
+		Timestamp: time.Unix(100, 0), CaptureLength: 60, Length: 60,
+	}})
+	broken := append([]byte(nil), data...)
+	binary.LittleEndian.PutUint32(broken[16:20], 0)
+	if err := os.WriteFile(path, broken, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectCapture(path); err == nil {
+		t.Fatal("zero classic PCAP snaplen accepted")
+	}
+}
+
 func TestClassicPCAPFramingAcceptsBothEndianFormats(t *testing.T) {
 	for _, tc := range []struct {
 		name  string

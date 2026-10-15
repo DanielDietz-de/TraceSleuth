@@ -159,6 +159,13 @@ func TestStableFindingIDIndependentOfInputOrderAndMapIteration(t *testing.T) {
 	if err != nil || id1 != id2 {
 		t.Fatalf("finding ID depends on packet or Go map order: %s vs %s (%v)", id1, id2, err)
 	}
+	// Human-readable explanations may be translated without altering
+	// instance identity; only packet/structured observation facts matter.
+	reversed[0].Reason = "erste Beobachtung"
+	idTranslated, err := StableFindingID("stp.root_change", "1", "stp", reversed)
+	if err != nil || idTranslated != id1 {
+		t.Fatalf("localized presentation text changed finding ID: %s vs %s (%v)", id1, idTranslated, err)
+	}
 	reversed[0].PacketNumber++
 	id3, err := StableFindingID("stp.root_change", "1", "stp", reversed)
 	if err != nil || id3 == id1 {
@@ -166,5 +173,25 @@ func TestStableFindingIDIndependentOfInputOrderAndMapIteration(t *testing.T) {
 	}
 	if _, err := StableFindingID("", "1", "stp", packets); err == nil {
 		t.Fatal("empty detector ID accepted")
+	}
+}
+
+func TestConfidenceMagnitudeAndFanoutAreBounded(t *testing.T) {
+	for _, delta := range []int{-101, 101} {
+		conf := ExplainedConfidence{Base: 50, Adjustments: []ConfidenceAdjustment{{
+			EvidenceFamily: "one-independent-signal", Delta: delta, Reason: "unit fixture",
+		}}}
+		if _, err := conf.Calculated(); err == nil {
+			t.Fatalf("out-of-range confidence delta %d accepted", delta)
+		}
+	}
+	large := ExplainedConfidence{Base: 50, Adjustments: make([]ConfidenceAdjustment, 1025)}
+	if _, err := large.Calculated(); err == nil {
+		t.Fatal("unbounded confidence evidence fanout accepted")
+	}
+	f := validAlphaFinding(t)
+	f.Confidence.Adjustments[0].EvidenceIDs = nil
+	if err := f.Validate(); err == nil {
+		t.Fatal("untraceable confidence contribution accepted")
 	}
 }

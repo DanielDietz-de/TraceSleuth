@@ -46,6 +46,9 @@ jobs:
       - name: Validate fresh release-gate contract fixtures
         run: python3 -m unittest discover -s scripts -p 'test_require_release_gates.py'
 
+      - name: Validate historical release workflow disable-state fixtures
+        run: python3 -m unittest discover -s scripts -p 'test_legacy_release_disabled.py'
+
       - name: Validate changed-file hygiene
         shell: bash
         run: |

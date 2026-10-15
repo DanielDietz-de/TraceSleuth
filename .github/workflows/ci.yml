@@ -31,6 +31,9 @@ jobs:
       - name: Validate version contract
         run: bash scripts/check-version-contract.sh
 
+      - name: Validate release event authorization
+        run: bash scripts/test-release-context.sh
+
       - name: Validate changed-file hygiene
         shell: bash
         run: |

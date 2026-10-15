@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -159,5 +160,41 @@ func TestPCAPNGFramingRejectsEPBExceedingInterfaceSnaplen(t *testing.T) {
 	}
 	if _, err := InspectCapture(path); err == nil {
 		t.Fatal("EPB captured length exceeded its own interface snaplen")
+	}
+}
+
+func TestPCAPNGFramingCapsSectionAndInterfaceMetadata(t *testing.T) {
+	path, valid := makeQualityFixture(t, true, []gopacket.CaptureInfo{{
+		Timestamp: time.Unix(1_000, 0), CaptureLength: 60, Length: 60,
+	}})
+	var sectionBody [16]byte
+	binary.LittleEndian.PutUint32(sectionBody[:4], 0x1a2b3c4d)
+	binary.LittleEndian.PutUint16(sectionBody[4:6], 1)
+	binary.LittleEndian.PutUint64(sectionBody[8:16], ^uint64(0))
+	section := framedPCAPNGBlock(0x0a0d0d0a, sectionBody[:])
+	data := append([]byte(nil), valid...)
+	for i := 0; i < maxPCAPNGSections; i++ {
+		data = append(data, section...)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectCapture(path); err == nil || !strings.Contains(err.Error(), "sections") {
+		t.Fatalf("unbounded PCAPNG sections accepted: %v", err)
+	}
+	// One section with too many descriptor entries is separately capped.
+	var descriptor [8]byte
+	binary.LittleEndian.PutUint16(descriptor[:2], 1)
+	binary.LittleEndian.PutUint32(descriptor[4:8], 65535)
+	idb := framedPCAPNGBlock(1, descriptor[:])
+	data = append([]byte(nil), valid...)
+	for i := 0; i <= maxPCAPNGPerSectionIDs; i++ {
+		data = append(data, idb...)
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectCapture(path); err == nil || !strings.Contains(err.Error(), "metadata limit") {
+		t.Fatalf("unbounded PCAPNG interface entries accepted: %v", err)
 	}
 }

@@ -7,18 +7,80 @@ import (
 	"os"
 )
 
-// PCAPNG may carry large metadata blocks, but any *single packet* larger than
-// this bound is outside TraceSleuth's supported packet-capture resource model.
-// It prevents a corrupt capture-length field from allocating gigabytes in
-// the pinned third-party NgReader, before the parser can return an error.
+// The pinned pcapgo NgReader allocates CaptureLength before reading packet
+// bytes. Enforce a finite per-packet bound on untrusted PCAPNG input.
 const maxPCAPNGPacketBytes uint64 = 16 << 20
 
-// validatePCAPNGBlockFraming checks all on-disk block envelopes and the
-// declared lengths of packet-bearing blocks before gopacket receives a file.
-// gopacket/pcapgo v1.1.19 can return a normal io.EOF in the middle of a block.
-// The scan uses bounded ReaderAt calls on the same descriptor, in O(1)
-// auxiliary memory, and returns the validated file extent for bounded reads.
-// Packet protocol semantics remain the decoder's responsibility.
+// validatePCAPNGOptions validates metadata TLVs *within* their containing
+// block. The pinned NgReader does not reliably distinguish truncated option
+// values from clean EOF and indexes some options without a length check.
+func validatePCAPNGOptions(file *os.File, start, end int64, order binary.ByteOrder, blockType uint32) error {
+	var optionHeader [4]byte
+	for pos := start; pos < end; {
+		if end-pos < 4 {
+			return fmt.Errorf("partial PCAPNG option header at byte %d", pos)
+		}
+		if _, err := file.ReadAt(optionHeader[:], pos); err != nil {
+			return fmt.Errorf("read PCAPNG option at byte %d: %w", pos, err)
+		}
+		code := order.Uint16(optionHeader[:2])
+		length := uint64(order.Uint16(optionHeader[2:]))
+		if code == 0 {
+			if length != 0 {
+				return fmt.Errorf("invalid PCAPNG end-of-options length at byte %d", pos)
+			}
+			// The reader discards any remainder after the end marker; reject
+			// non-zero trailing content rather than concealing malformed TLVs.
+			for tail := pos + 4; tail < end; {
+				var zero [4]byte
+				n := int64(4)
+				if end-tail < n {
+					n = end - tail
+				}
+				if _, err := file.ReadAt(zero[:n], tail); err != nil {
+					return fmt.Errorf("read PCAPNG option padding: %w", err)
+				}
+				for _, b := range zero[:n] {
+					if b != 0 {
+						return fmt.Errorf("non-zero bytes after PCAPNG end-of-options at byte %d", tail)
+					}
+				}
+				tail += n
+			}
+			return nil
+		}
+		padded := (length + 3) &^ uint64(3)
+		if padded > uint64(end-pos-4) {
+			return fmt.Errorf("PCAPNG option at byte %d exceeds block boundary", pos)
+		}
+		// Only validate known options *interpreted* by the pinned reader.
+		// Other legal TLVs are opaque but must respect their envelope.
+		minLength := uint64(0)
+		switch blockType {
+		case 1: // Interface Description Block
+			switch code {
+			case 9, 11: // timestamp resolution / filter type byte
+				minLength = 1
+			case 14: // timestamp offset
+				minLength = 8
+			}
+		case 5: // Interface Statistics Block
+			if code >= 2 && code <= 5 { // timestamps and counts
+				minLength = 8
+			}
+		}
+		if length < minLength {
+			return fmt.Errorf("PCAPNG option %d in block %d is too short at byte %d", code, blockType, pos)
+		}
+		pos += 4 + int64(padded)
+	}
+	return nil
+}
+
+// validatePCAPNGBlockFraming verifies all known packet/metadata block framing
+// before any third-party decoder sees untrusted input. The check is bounded in
+// memory (ReaderAt, no block allocation), supports multiple byte orders and
+// returns the validated extent for an io.SectionReader snapshot.
 func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 	info, err := file.Stat()
 	if err != nil {
@@ -34,6 +96,7 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 	var fixedPacketHeader [28]byte
 	var trailer [4]byte
 	var order binary.ByteOrder
+	var snaplens []uint32
 
 	for offset := int64(0); offset < size; {
 		if size-offset < int64(len(header)) {
@@ -52,6 +115,7 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 			default:
 				return 0, fmt.Errorf("invalid PCAPNG byte-order magic at byte %d", offset)
 			}
+			snaplens = nil // interface IDs restart in every section
 		} else if order == nil {
 			return 0, fmt.Errorf("PCAPNG starts without a section header at byte %d", offset)
 		}
@@ -60,21 +124,21 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 		blockLength := order.Uint32(header[4:8])
 		minimum := uint32(12)
 		switch blockType {
-		case 0x0a0d0d0a: // Section Header Block
+		case 0x0a0d0d0a:
 			minimum = 28
-		case 1: // Interface Description Block
+		case 1: // Interface Description
 			minimum = 20
-		case 2, 6: // Packet Block (legacy) / Enhanced Packet Block
+		case 2, 6: // Obsolete Packet / Enhanced Packet
 			minimum = 32
-		case 3: // Simple Packet Block
+		case 3: // Simple Packet
 			minimum = 16
-		case 4: // Name Resolution Block
+		case 4: // Name Resolution
 			minimum = 16
-		case 5: // Interface Statistics Block
+		case 5: // Interface Statistics
 			minimum = 24
-		case 10: // Decryption Secrets Block
+		case 10: // Decryption Secrets
 			minimum = 20
-		case 0x00000bad, 0x40000bad: // Custom blocks contain a private enterprise number
+		case 0x00000bad, 0x40000bad: // Custom blocks
 			minimum = 16
 		}
 		if blockLength < minimum || blockLength%4 != 0 {
@@ -85,10 +149,24 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 		}
 
 		switch blockType {
+		case 0x0a0d0d0a: // Section header: 24-byte fixed data, then options
+			if err := validatePCAPNGOptions(file, offset+24, offset+int64(blockLength)-4, order, blockType); err != nil {
+				return 0, err
+			}
+		case 1: // Interface descriptor: 8-byte fixed data
+			var desc [8]byte
+			if _, err := file.ReadAt(desc[:], offset+8); err != nil {
+				return 0, fmt.Errorf("read interface descriptor: %w", err)
+			}
+			snaplens = append(snaplens, order.Uint32(desc[4:8]))
+			if err := validatePCAPNGOptions(file, offset+16, offset+int64(blockLength)-4, order, blockType); err != nil {
+				return 0, err
+			}
+		case 5: // Interface statistics: 12-byte fixed data
+			if err := validatePCAPNGOptions(file, offset+20, offset+int64(blockLength)-4, order, blockType); err != nil {
+				return 0, err
+			}
 		case 2, 6:
-			// Both legacy PB and enhanced EPB have the captured and original
-			// byte lengths at block-relative offsets 20 and 24, respectively.
-			// Require all padded packet bytes to fit before the final trailer.
 			if _, err := file.ReadAt(fixedPacketHeader[:], offset); err != nil {
 				return 0, fmt.Errorf("read PCAPNG packet header at byte %d: %w", offset, err)
 			}
@@ -100,10 +178,22 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 				return 0, fmt.Errorf("invalid PCAPNG packet length at byte %d: captured=%d original=%d block=%d", offset, captured, original, blockLength)
 			}
 		case 3:
-			// The SPB has an implicit capture length derived from its block
-			// extent. Bound it too, to prevent huge allocations on read.
-			if uint64(blockLength)-16 > maxPCAPNGPacketBytes+3 {
-				return 0, fmt.Errorf("oversize PCAPNG simple packet at byte %d", offset)
+			// SPB has no explicit captured length: read min(original,
+			// interface-zero snaplen), and ensure the padded bytes exist.
+			if len(snaplens) == 0 {
+				return 0, fmt.Errorf("PCAPNG simple packet precedes interface descriptor at byte %d", offset)
+			}
+			var field [4]byte
+			if _, err := file.ReadAt(field[:], offset+8); err != nil {
+				return 0, fmt.Errorf("read PCAPNG simple packet size: %w", err)
+			}
+			captured := uint64(order.Uint32(field[:]))
+			if snaplens[0] != 0 && captured > uint64(snaplens[0]) {
+				captured = uint64(snaplens[0])
+			}
+			padded := (captured + 3) &^ uint64(3)
+			if captured > maxPCAPNGPacketBytes || uint64(blockLength) != 16+padded {
+				return 0, fmt.Errorf("invalid PCAPNG simple packet size at byte %d", offset)
 			}
 		}
 

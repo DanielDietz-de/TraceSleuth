@@ -1,13 +1,11 @@
 name: Release
 
-# A version-tag push or an explicitly authorized main-branch release can
-# publish artifacts, but only after exact-SHA CI and Security pass.
+# Release only from the trusted default branch. Never load a release workflow
+# from an arbitrary tag or historical unreviewed commit.
 on:
   push:
     branches:
       - main
-    tags:
-      - 'v*.*.*'
   workflow_dispatch:
     inputs:
       publish_version:
@@ -17,7 +15,7 @@ on:
 
 permissions:
   contents: write
-  actions: read
+  actions: write
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
@@ -32,7 +30,6 @@ jobs:
   release:
     name: Build and release TraceSleuth
     if: >-
-      (github.event_name == 'push' && github.ref_type == 'tag') ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main' &&
        startsWith(github.event.head_commit.message, 'release: v'))
@@ -53,37 +50,11 @@ jobs:
           RELEASE_INPUT_VERSION: ${{ inputs.publish_version }}
         run: bash scripts/release-context.sh
 
-      - name: Require fresh CI and Security on release commit
+      - name: Dispatch and verify fresh release-specific CI and Security
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          # 120 minutes for concurrent hosted CI/CodeQL/scanner jobs, with
-          # 60 minutes reserved for build/publication gates.
-          for attempt in $(seq 1 720); do
-            completed=0
-            for flow in ci.yml security.yml; do
-              url="repos/${GITHUB_REPOSITORY}/actions/workflows/${flow}/runs?head_sha=${GITHUB_SHA}&event=push&per_page=100"
-              state="$(gh api "$url" | jq -r --arg sha "$GITHUB_SHA" '
-                [.workflow_runs[] | select(.head_sha == $sha)] |
-                sort_by(.id) | last | (.conclusion // "pending")
-              ')"
-              printf '%s exact SHA=%s result=%s\n' "$flow" "$GITHUB_SHA" "$state"
-              case "$state" in
-                success) completed=$((completed + 1));;
-                pending) ;;
-                *) echo "Refusing release: $flow concluded $state" >&2; exit 1;;
-              esac
-            done
-            if [[ "$completed" == 2 ]]; then
-              echo 'Both exact-commit push workflows are successful.'
-              exit 0
-            fi
-            sleep 10
-          done
-          echo 'Timed out waiting for CI and Security on this exact commit.' >&2
-          exit 1
+        run: python3 scripts/require-release-gates.py dispatch
 
       - name: Require protected version-tag ruleset
         shell: bash
@@ -234,6 +205,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
+          python3 scripts/require-release-gates.py verify
           tag='${{ steps.version.outputs.tag }}'
           ref_route="repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}"
           if ! ref_json="$(gh api "$ref_route" 2>/dev/null)"; then
@@ -263,8 +235,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Recheck immediately before publication. The tag ruleset
-          # prevents an ordinary tag writer from moving this ref.
+          # Recheck exact-SHA CI/Security and tag policy before publication.
+          python3 scripts/require-release-gates.py verify
           python3 scripts/check-release-tag-protection.py '${{ steps.version.outputs.tag }}'
           tag='${{ steps.version.outputs.tag }}'
           ref_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}")"

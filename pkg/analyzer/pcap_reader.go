@@ -84,6 +84,11 @@ func openCaptureOnFile(f *os.File, options pcapgo.NgReaderOptions) (*CaptureHand
 	}
 	handle := &CaptureHandle{File: f, Format: format}
 	if format == FormatPCAPNG {
+		// The decoder can mask truncated block tails as io.EOF. Validate the
+		// full block envelope before trusting any observed packet counts.
+		if err := validatePCAPNGBlockFraming(f); err != nil {
+			return nil, fmt.Errorf("invalid PCAPNG block framing: %w", err)
+		}
 		options.WantMixedLinkType = true
 		reader, err := pcapgo.NewNgReader(f, options)
 		if err != nil {

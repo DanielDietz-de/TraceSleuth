@@ -37,9 +37,11 @@ jobs:
           set -uo pipefail
           # Lockfile-only: never execute third-party install/build scripts while
           # this workflow holds the scoped repository push credential.
-          npm audit fix --package-lock-only --ignore-scripts
-          result=$?
-          echo "npm audit fix exit: $result"
+          if npm audit fix --package-lock-only --ignore-scripts; then
+            echo 'Compatible npm audit repairs completed.'
+          else
+            echo 'Compatible npm repairs left unresolved advisories; committing updated lockfile for further triage.'
+          fi
           if git diff --quiet -- package-lock.json; then
             echo 'No lockfile changes were available.'
           else

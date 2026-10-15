@@ -88,14 +88,21 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 	linkTypeSet := map[string]bool{}
 	interfacePackets := map[int]uint64{}
 	interfaceDepth := map[int]uint32{}
+	interfaceTruncated := map[int]bool{}
 	var usableEthernetDepth uint32
 	activeEthernetInterfaces := 0
 	// A single deeper interface must not conceal a shallow one. Capabilities
 	// require that EVERY active Ethernet capture point can observe the header.
-	observeEthernetDepth := func(sectionIndex, ifaceIndex int, snapLength, observedBytes uint32) {
-		depth := observedBytes
-		if snapLength != 0 && snapLength < depth {
-			depth = snapLength
+	observeEthernetDepth := func(sectionIndex, ifaceIndex int, snapLength, observedBytes uint32, truncated bool) {
+		// Capacity is determined by capture snaplen, not the length of ordinary
+		// traffic seen. A short untruncated frame does not prove a LACP frame
+		// would have been truncated. PCAPNG snaplen=0 means unlimited.
+		depth := snapLength
+		if depth == 0 {
+			depth = ^uint32(0)
+		}
+		if truncated && observedBytes < depth {
+			depth = observedBytes
 		}
 		if activeEthernetInterfaces == 0 || depth < usableEthernetDepth {
 			usableEthernetDepth = depth
@@ -111,7 +118,7 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 				Code:     "insufficient_layer2_capture_depth",
 				Severity: severity,
 				Description: fmt.Sprintf(
-					"Capture section %d interface %d retains at most %d Ethernet bytes (snap length %d); full STP/LACP evidence may be unavailable on this capture point.",
+					"Capture section %d interface %d has an effective capture depth of at most %d Ethernet bytes (snap length %d); full STP/LACP evidence may be unavailable on this capture point.",
 					sectionIndex, ifaceIndex, depth, snapLength,
 				),
 			})
@@ -130,7 +137,7 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 	finishSection := func(interfaces []pcapgo.NgInterface) {
 		for idx, iface := range interfaces {
 			if iface.LinkType == layers.LinkTypeEthernet && interfacePackets[idx] > 0 {
-				observeEthernetDepth(section, idx, iface.SnapLength, interfaceDepth[idx])
+				observeEthernetDepth(section, idx, iface.SnapLength, interfaceDepth[idx], interfaceTruncated[idx])
 			}
 			info := models.CaptureInterface{
 				SectionIndex: section,
@@ -163,6 +170,7 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 		section++
 		interfacePackets = make(map[int]uint64)
 		interfaceDepth = make(map[int]uint32)
+		interfaceTruncated = make(map[int]bool)
 		statsObserved = make(map[int]bool)
 	}
 
@@ -201,6 +209,7 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 		q.OriginalBytes += uint64(ci.Length)
 		if ci.CaptureLength < ci.Length {
 			q.TruncatedPackets++
+			interfaceTruncated[ci.InterfaceIndex] = true
 		}
 		interfacePackets[ci.InterfaceIndex]++
 		if uint32(len(data)) > interfaceDepth[ci.InterfaceIndex] {
@@ -254,7 +263,7 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 			return fail(err)
 		}
 		if classic.LinkType() == layers.LinkTypeEthernet && interfacePackets[0] > 0 {
-			observeEthernetDepth(0, 0, classic.Snaplen(), interfaceDepth[0])
+			observeEthernetDepth(0, 0, classic.Snaplen(), interfaceDepth[0], interfaceTruncated[0])
 		}
 		q.Interfaces = append(q.Interfaces, models.CaptureInterface{
 			SectionIndex: 0, Index: 0, LinkType: classic.LinkType().String(),

@@ -662,7 +662,7 @@ func TestInspectCaptureRejectsMalformedFramedPCAPNGPacketBlock(t *testing.T) {
 	binary.LittleEndian.PutUint32(oversizedPacket[28:32], 32)
 
 	for _, tc := range []struct {
-		name string
+		name  string
 		block []byte
 	}{
 		{"short enhanced packet block", shortEPB},

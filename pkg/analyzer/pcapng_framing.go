@@ -15,11 +15,12 @@ const maxPCAPNGPacketBytes uint64 = 16 << 20
 // of tiny section/IDB blocks must not expand into unbounded JSON and heap
 // allocations. This is explicitly a pre-production limit, not silent sampling.
 const (
-	maxPCAPNGSections         = 1024
-	maxPCAPNGInterfaces       = 8192
-	maxPCAPNGPerSectionIDs    = 256
-	maxPCAPNGIDBOptionBytes   = 2048
-	maxPCAPNGIDBMetadataBytes = 1 << 20
+	maxPCAPNGSections                   = 1024
+	maxPCAPNGInterfaces                 = 8192
+	maxPCAPNGPerSectionIDs              = 256
+	maxPCAPNGIDBOptionBytes             = 2048
+	maxPCAPNGIDBMetadataBytes           = 1 << 20
+	maxPCAPNGTrailingOptionPaddingBytes = 4 << 10
 )
 
 // validatePCAPNGOptions validates metadata TLVs *within* their containing
@@ -40,25 +41,38 @@ func validatePCAPNGOptions(file *os.File, start, end int64, order binary.ByteOrd
 			if length != 0 {
 				return fmt.Errorf("invalid PCAPNG end-of-options length at byte %d", pos)
 			}
-			// The reader discards any remainder after the end marker; reject
-			// non-zero trailing content rather than concealing malformed TLVs.
+			// Some captures legitimately pad an option area after its end
+			// marker. Bound both the accepted excess and the number of syscalls;
+			// otherwise a single large zero-filled block can induce hundreds of
+			// millions of four-byte ReadAt calls in preflight.
+			remaining := end - (pos + 4)
+			if remaining > maxPCAPNGTrailingOptionPaddingBytes {
+				return fmt.Errorf("PCAPNG option padding at byte %d exceeds %d bytes", pos, maxPCAPNGTrailingOptionPaddingBytes)
+			}
+			var chunk [4096]byte
 			for tail := pos + 4; tail < end; {
-				var zero [4]byte
-				n := int64(4)
-				if end-tail < n {
-					n = end - tail
+				n := len(chunk)
+				if int64(n) > end-tail {
+					n = int(end - tail)
 				}
-				if _, err := file.ReadAt(zero[:n], tail); err != nil {
+				if _, err := file.ReadAt(chunk[:n], tail); err != nil {
 					return fmt.Errorf("read PCAPNG option padding: %w", err)
 				}
-				for _, b := range zero[:n] {
+				for i, b := range chunk[:n] {
 					if b != 0 {
-						return fmt.Errorf("non-zero bytes after PCAPNG end-of-options at byte %d", tail)
+						return fmt.Errorf("non-zero bytes after PCAPNG end-of-options at byte %d", tail+int64(i))
 					}
 				}
-				tail += n
+				tail += int64(n)
 			}
 			return nil
+		}
+		// gopacket v1.1.19 reuses its prior option-value buffer for empty
+		// options. An empty recognized field (e.g. if_name) can therefore
+		// retain a large, unrelated previous option. Reject all zero-length
+		// non-terminator options before decoder allocation and JSON output.
+		if length == 0 {
+			return fmt.Errorf("unsafe zero-length PCAPNG option %d at byte %d", code, pos)
 		}
 		padded := (length + 3) &^ uint64(3)
 		if padded > uint64(end-pos-4) {

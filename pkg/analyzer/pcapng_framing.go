@@ -11,6 +11,15 @@ import (
 // bytes. Enforce a finite per-packet bound on untrusted PCAPNG input.
 const maxPCAPNGPacketBytes uint64 = 16 << 20
 
+// Hard bounds for serialized per-interface metadata. A capture with millions
+// of tiny section/IDB blocks must not expand into unbounded JSON and heap
+// allocations. This is explicitly a pre-production limit, not silent sampling.
+const (
+	maxPCAPNGSections      = 1024
+	maxPCAPNGInterfaces    = 8192
+	maxPCAPNGPerSectionIDs = 256
+)
+
 // validatePCAPNGOptions validates metadata TLVs *within* their containing
 // block. The pinned NgReader does not reliably distinguish truncated option
 // values from clean EOF and indexes some options without a length check.
@@ -81,7 +90,7 @@ func validatePCAPNGOptions(file *os.File, start, end int64, order binary.ByteOrd
 				return fmt.Errorf("read PCAPNG timestamp resolution: %w", err)
 			}
 			exponent := encoded[0] & 0x7f
-			if (encoded[0]&0x80 != 0 && exponent > 63) ||
+			if (encoded[0]&0x80 != 0 && exponent > 9) ||
 				(encoded[0]&0x80 == 0 && exponent > 19) {
 				return fmt.Errorf("PCAPNG timestamp resolution exceeds safe uint64 precision at byte %d", pos)
 			}
@@ -111,6 +120,8 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 	var trailer [4]byte
 	var order binary.ByteOrder
 	var snaplens []uint32
+	sections := 0
+	interfaces := 0
 
 	for offset := int64(0); offset < size; {
 		if size-offset < int64(len(header)) {
@@ -121,6 +132,10 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 		}
 		isSection := bytes.Equal(header[:4], sectionMagic)
 		if isSection {
+			sections++
+			if sections > maxPCAPNGSections {
+				return 0, fmt.Errorf("capture has more than %d PCAPNG sections", maxPCAPNGSections)
+			}
 			switch {
 			case bytes.Equal(header[8:12], []byte{0x4d, 0x3c, 0x2b, 0x1a}):
 				order = binary.LittleEndian
@@ -168,6 +183,10 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 				return 0, err
 			}
 		case 1: // Interface descriptor: 8-byte fixed data
+			interfaces++
+			if interfaces > maxPCAPNGInterfaces || len(snaplens) >= maxPCAPNGPerSectionIDs {
+				return 0, fmt.Errorf("capture exceeds PCAPNG interface metadata limit")
+			}
 			var desc [8]byte
 			if _, err := file.ReadAt(desc[:], offset+8); err != nil {
 				return 0, fmt.Errorf("read interface descriptor: %w", err)

@@ -436,3 +436,84 @@ func TestNormalizedConfidenceRejectsWhitespaceAliasedFamily(t *testing.T) {
 		t.Fatal("whitespace alias permitted duplicate confidence family")
 	}
 }
+
+func TestFindingRejectsNoncanonicalEvidenceAndPacketAliases(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		edit func(*DiagnosticFinding)
+	}{
+		{"whitespace alias of capture ID", func(f *DiagnosticFinding) {
+			p := *f.Evidence[0].Packet
+			p.CaptureID = " " + p.CaptureID + " "
+			f.Evidence[0].Packet = &p
+		}},
+		{"whitespace alias of top-level capture ID", func(f *DiagnosticFinding) {
+			f.PacketReferences[0].CaptureID += " "
+		}},
+		{"whitespace alias of metric evidence ID", func(f *DiagnosticFinding) {
+			f.Evidence[1].ID = " evidence-1 "
+			f.Confidence.Adjustments[1].EvidenceIDs = []string{" evidence-1 "}
+		}},
+		{"evidence points to different packet", func(f *DiagnosticFinding) {
+			p := *f.Evidence[0].Packet
+			p.PacketNumber++
+			f.Evidence[0].Packet = &p
+		}},
+		{"evidence points to different interface", func(f *DiagnosticFinding) {
+			p := *f.Evidence[0].Packet
+			other := 9
+			p.CaptureInterfaceID = &other
+			f.Evidence[0].Packet = &p
+		}},
+		{"evidence packet timestamp differs", func(f *DiagnosticFinding) {
+			p := *f.Evidence[0].Packet
+			other := p.Timestamp.Add(time.Second)
+			p.Timestamp = &other
+			f.Evidence[0].Packet = &p
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := validAlphaFinding(t)
+			tc.edit(&f)
+			if err := f.Validate(); err == nil {
+				t.Fatal("non-canonical or unreconciled evidence passed validation")
+			}
+		})
+	}
+	p := PacketSourceReference{CaptureID: " capture ", PacketNumber: 1, Reason: "test"}
+	if _, err := StableFindingID("a", "1", "b", []PacketSourceReference{p}); err == nil {
+		t.Fatal("non-canonical capture ID hashed as valid evidence")
+	}
+}
+
+func TestFindingPacketEvidenceAcceptsSameInstantInAnotherZone(t *testing.T) {
+	f := validAlphaFinding(t)
+	packet := *f.Evidence[0].Packet
+	timestamp := packet.Timestamp.In(time.FixedZone("UTC+03", 3*60*60))
+	packet.Timestamp = &timestamp
+	f.Evidence[0].Packet = &packet
+	if err := f.Validate(); err != nil {
+		t.Fatalf("matching packet instant with a different timezone rejected: %v", err)
+	}
+}
+
+func TestStrongInferenceRequiresIndependentPositiveSignals(t *testing.T) {
+	f := validAlphaFinding(t)
+	f.Certainty = CertaintyStronglyInferred
+	if err := f.Validate(); err == nil {
+		t.Fatal("strong inference accepted only one positive family and one penalty")
+	}
+	value := 7.0
+	f.Evidence[1] = FindingEvidence{
+		ID: "evidence-2", Kind: "metric", Description: "Independent observed metric",
+		Value: &value, Unit: "count",
+	}
+	f.Confidence.Adjustments[1] = ConfidenceAdjustment{
+		EvidenceFamily: "independent_metric", Delta: 10,
+		Reason: "second independent observation", EvidenceIDs: []string{"evidence-2"},
+	}
+	f.Confidence.Final = 85
+	if err := f.Validate(); err != nil {
+		t.Fatalf("strong inference with two independent supporting families was rejected: %v", err)
+	}
+}

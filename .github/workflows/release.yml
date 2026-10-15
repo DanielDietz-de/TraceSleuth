@@ -51,38 +51,7 @@ jobs:
         env:
           RELEASE_MESSAGE: ${{ github.event.head_commit.message }}
           RELEASE_INPUT_VERSION: ${{ inputs.publish_version }}
-        run: |
-          set -euo pipefail
-          version="$(tr -d '\r\n' < VERSION)"
-          expected="v${version}"
-          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/tags/* ]]; then
-            tag="${GITHUB_REF#refs/tags/}"
-          elif [[ "$GITHUB_REF" == refs/heads/main && "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
-            tag="$expected"
-            if [[ "$RELEASE_INPUT_VERSION" != "$version" ]]; then
-              echo 'Manual release VERSION does not match the repository.' >&2
-              exit 1
-            fi
-          elif [[ "$GITHUB_REF" == refs/heads/main && "$GITHUB_EVENT_NAME" == push ]]; then
-            tag="$expected"
-            subject="${RELEASE_MESSAGE%%$'\n'*}"
-            if [[ "$subject" != "release: $expected" && "$subject" != "release: $expected "* ]]; then
-              echo 'A main-branch release requires release: vX.Y.Z in the commit subject.' >&2
-              exit 1
-            fi
-          else
-            echo 'Release must originate from a version tag or authorized main.' >&2
-            exit 1
-          fi
-          if [[ "$tag" != "$expected" ]]; then
-            printf 'Tag/version mismatch: tag=%s VERSION=%s\n' "$tag" "$version" >&2
-            exit 1
-          fi
-          bash scripts/check-version-contract.sh
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-          echo "date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
+        run: bash scripts/release-context.sh
 
       - name: Require fresh CI and Security on release commit
         shell: bash

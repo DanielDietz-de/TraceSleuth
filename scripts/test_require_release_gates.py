@@ -18,11 +18,14 @@ GATE = "release-gate-123-1"
 
 def run(id: int, *, title: str = GATE, event: str = "workflow_dispatch",
         sha: str = SHA, branch: str = "main", status: str = "completed",
-        conclusion: str | None = "success") -> dict:
+        conclusion: str | None = "success",
+        created_at: str = "2026-10-15T09:00:00Z",
+        updated_at: str = "2026-10-15T09:01:00Z") -> dict:
     return {
         "id": id, "display_title": title, "event": event,
         "head_sha": sha, "head_branch": branch,
         "status": status, "conclusion": conclusion,
+        "created_at": created_at, "updated_at": updated_at,
     }
 
 
@@ -39,7 +42,7 @@ class TestReleaseGateContract(TestCase):
                 raise AssertionError(route)
             if "&event=workflow_dispatch" in route:
                 result = [x for x in result if x["event"] == "workflow_dispatch"]
-            return {"workflow_runs": result}
+            return {"workflow_runs": result, "total_count": len(result)}
         return mock.patch.object(gates, "gh_api", side_effect=fake)
 
     def test_fresh_success_on_exact_commit(self):
@@ -82,6 +85,36 @@ class TestReleaseGateContract(TestCase):
         with self.api([run(12)], security):
             with self.assertRaises(gates.GatePending):
                 gates.check_gates(REPO, SHA, GATE)
+
+    def test_failed_rerun_of_older_run_id_blocks_release(self):
+        old = run(10, title="historical", event="schedule",
+                  conclusion="failure", created_at="2026-10-14T09:00:00Z",
+                  updated_at="2026-10-15T09:05:00Z")
+        with self.api([run(12)], [old, run(19)]):
+            with self.assertRaises(gates.GateFailure):
+                gates.check_gates(REPO, SHA, GATE)
+
+    def test_pending_rerun_of_older_run_id_blocks_release(self):
+        old = run(10, title="old push", event="push", status="in_progress",
+                  conclusion=None, created_at="2026-10-10T09:00:00Z",
+                  updated_at="2026-10-15T09:05:00Z")
+        with self.api([old, run(12)], [run(19)]):
+            with self.assertRaises(gates.GatePending):
+                gates.check_gates(REPO, SHA, GATE)
+
+    def test_old_completed_run_before_release_is_not_a_new_failure(self):
+        old = run(10, title="old push", event="push", conclusion="failure",
+                  created_at="2026-10-10T09:00:00Z",
+                  updated_at="2026-10-14T09:00:00Z")
+        with self.api([old, run(12)], [run(19)]):
+            gates.check_gates(REPO, SHA, GATE)
+
+    def test_missing_or_truncated_workflow_history_rejected(self):
+        with mock.patch.object(gates, "gh_api", return_value={
+            "workflow_runs": [run(12)], "total_count": 102,
+        }):
+            with self.assertRaises(gates.GateFailure):
+                gates.workflow_runs(REPO, "ci.yml", SHA)
 
     def test_main_movement_blocks_release(self):
         with self.api([run(12)], [run(19)], main_sha="b" * 40):

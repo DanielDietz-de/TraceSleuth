@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 import subprocess
 import sys
 import time
@@ -76,6 +77,11 @@ def workflow_runs(repo: str, flow: str, sha: str, *, event: str | None = None) -
         raise GateFailure(f"Unverifiable {flow} workflow-run response")
     if not all(isinstance(run, dict) for run in obj["workflow_runs"]):
         raise GateFailure(f"Malformed {flow} workflow-run entry")
+    # The API sorts runs by their original ID, not a rerun's attempt time.
+    # Never certify a subset that could hide a much older rerun.
+    total = obj.get("total_count")
+    if not isinstance(total, int) or total > len(obj["workflow_runs"]):
+        raise GateFailure(f"Truncated or unverifiable {flow} run history for exact SHA")
     return obj["workflow_runs"]
 
 
@@ -98,6 +104,18 @@ def require_success(run: dict[str, Any], description: str) -> None:
         raise GateFailure(f"{description} concluded {run.get('conclusion')!r}")
 
 
+def timestamp(value: Any) -> datetime:
+    if not isinstance(value, str):
+        raise GateFailure("Missing GitHub run timestamp")
+    try:
+        result = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise GateFailure("Malformed GitHub run timestamp") from exc
+    if result.tzinfo is None:
+        raise GateFailure("Unzoned GitHub run timestamp")
+    return result
+
+
 def check_gates(repo: str, sha: str, gate_id: str) -> None:
     assert_main_unchanged(repo, sha)
     pending: list[str] = []
@@ -113,27 +131,31 @@ def check_gates(repo: str, sha: str, gate_id: str) -> None:
         except GatePending as exc:
             pending.append(str(exc))
 
-        # A later failed or pending Security/CI run on the same commit is
-        # material evidence. It must not be ignored in favor of an old success.
+        # Check every run whose ID or latest attempt/update is newer than
+        # this release gate. An older run's ID is stable across reruns, so
+        # comparing IDs alone silently ignores a later failed re-attempt.
+        started = timestamp(selected.get("created_at"))
         all_runs = workflow_runs(repo, flow, sha)
-        newest = max(
-            (
-                run for run in all_runs
-                if run.get("head_sha") == sha
-                and run.get("head_branch") == "main"
-                and run.get("event") in ("push", "schedule", "workflow_dispatch")
-                and isinstance(run.get("id"), int)
-                and run["id"] >= selected["id"]
-            ),
-            key=lambda run: run["id"],
-            default=None,
-        )
-        if newest is None:
-            raise GateFailure(f"Cannot independently verify latest {flow} run")
-        try:
-            require_success(newest, f"latest {flow} run {newest['id']}")
-        except GatePending as exc:
-            pending.append(str(exc))
+        eligible = [
+            run for run in all_runs
+            if run.get("head_sha") == sha
+            and run.get("head_branch") == "main"
+            and run.get("event") in ("push", "schedule", "workflow_dispatch")
+        ]
+        if not eligible or not any(
+            run.get("id") == selected["id"] for run in eligible
+        ):
+            raise GateFailure(f"Cannot independently verify {flow} release run")
+        for run in eligible:
+            if not isinstance(run.get("id"), int):
+                raise GateFailure(f"Invalid {flow} run identity")
+            latest_update = timestamp(run.get("updated_at"))
+            if run["id"] < selected["id"] and latest_update < started:
+                continue
+            try:
+                require_success(run, f"{flow} run {run['id']} (latest attempt)")
+            except GatePending as exc:
+                pending.append(str(exc))
     if pending:
         raise GatePending("; ".join(pending))
 

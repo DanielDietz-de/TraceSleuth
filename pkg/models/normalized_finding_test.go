@@ -333,7 +333,7 @@ func TestNormalizedFindingRejectsAliasedPacketsAndInvalidValues(t *testing.T) {
 			bad := time.Date(10000, time.January, 1, 0, 0, 0, 0, time.UTC)
 			f.PacketReferences[0].Timestamp = &bad
 		}},
-	}{
+	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := validAlphaFinding(t)
 			tc.edit(&f)

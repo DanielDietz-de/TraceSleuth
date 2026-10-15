@@ -33,6 +33,13 @@ func validateClassicPCAPFraming(file *os.File) (int64, error) {
 		return 0, fmt.Errorf("invalid classic PCAP magic 0x%08x", magic)
 	}
 	snaplen := uint64(order.Uint32(header[16:20]))
+	// PCAP encodes fractional seconds in microseconds or nanoseconds.
+	// Out-of-range fractions get normalized or overflowed by the
+	// third-party reader, corrupting observed timing while appearing valid.
+	fractionLimit := uint32(1_000_000)
+	if magic == pcapMagicNS || magic == pcapMagicNL {
+		fractionLimit = 1_000_000_000
+	}
 	var record [16]byte
 	packetIndex := 0
 	for offset := int64(24); offset < size; {
@@ -41,6 +48,13 @@ func validateClassicPCAPFraming(file *os.File) (int64, error) {
 		}
 		if _, err := file.ReadAt(record[:], offset); err != nil {
 			return 0, &MalformedCaptureRecordError{Index: packetIndex, Cause: fmt.Errorf("read PCAP record at byte %d: %w", offset, err)}
+		}
+		fraction := order.Uint32(record[4:8])
+		if fraction >= fractionLimit {
+			return 0, &MalformedCaptureRecordError{
+				Index: packetIndex,
+				Cause: fmt.Errorf("invalid classic PCAP timestamp fraction at byte %d", offset),
+			}
 		}
 		captured := uint64(order.Uint32(record[8:12]))
 		original := uint64(order.Uint32(record[12:16]))

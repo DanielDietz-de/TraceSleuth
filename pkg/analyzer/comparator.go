@@ -295,7 +295,10 @@ func (e *MalformedCaptureRecordError) Unwrap() error { return e.Cause }
 // streamFile opens a PCAP file and streams each packet through the callback.
 // Returns total packet count. No packet data is retained after the callback.
 func (c *Comparator) streamFile(filePath string, onPacket func(*packetMeta)) (int, error) {
-	handle, err := OpenCapture(filePath)
+	// Pin comparison to the same descriptor, byte count and preflight SHA-256.
+	// Bound PCAPNG reads to the validated extent, and reject any in-place
+	// mutation or append after streaming has completed.
+	quality, handle, err := InspectCaptureAndOpen(filePath)
 	if err != nil {
 		return 0, fmt.Errorf("invalid capture file: %w", err)
 	}
@@ -307,13 +310,26 @@ func (c *Comparator) streamFile(filePath string, onPacket func(*packetMeta)) (in
 	for {
 		data, ci, err := reader.ReadPacketData()
 		if errors.Is(err, io.EOF) {
+			if index == 0 {
+				return 0, fmt.Errorf("comparison capture contains no packet records")
+			}
 			break
 		}
 		if err != nil {
 			return index, &MalformedCaptureRecordError{Index: index, Cause: err}
 		}
 
-		pkt := gopacket.NewPacket(data, reader.LinkType(), gopacket.Lazy)
+		// Mixed-link-type PCAPNG embeds the packet's actual link type in
+		// AncillaryData. The NgReader's default link type may be unknown:
+		// decoding all such records as a single link type silently drops
+		// IP conversations and produces misleading comparison results.
+		linkType := reader.LinkType()
+		for _, extra := range ci.AncillaryData {
+			if lt, ok := extra.(layers.LinkType); ok {
+				linkType = lt
+			}
+		}
+		pkt := gopacket.NewPacket(data, linkType, gopacket.Lazy)
 		if pkt == nil {
 			index++
 			continue
@@ -480,6 +496,9 @@ func (c *Comparator) streamFile(filePath string, onPacket func(*packetMeta)) (in
 		index++
 	}
 
+	if err := VerifyCaptureHandle(handle, quality); err != nil {
+		return index, fmt.Errorf("comparison capture changed after preflight: %w", err)
+	}
 	return index, nil
 }
 

@@ -15,15 +15,17 @@ const maxPCAPNGPacketBytes uint64 = 16 << 20
 // of tiny section/IDB blocks must not expand into unbounded JSON and heap
 // allocations. This is explicitly a pre-production limit, not silent sampling.
 const (
-	maxPCAPNGSections      = 1024
-	maxPCAPNGInterfaces    = 8192
-	maxPCAPNGPerSectionIDs = 256
+	maxPCAPNGSections         = 1024
+	maxPCAPNGInterfaces       = 8192
+	maxPCAPNGPerSectionIDs    = 256
+	maxPCAPNGIDBOptionBytes   = 2048
+	maxPCAPNGIDBMetadataBytes = 1 << 20
 )
 
 // validatePCAPNGOptions validates metadata TLVs *within* their containing
 // block. The pinned NgReader does not reliably distinguish truncated option
 // values from clean EOF and indexes some options without a length check.
-func validatePCAPNGOptions(file *os.File, start, end int64, order binary.ByteOrder, blockType uint32) error {
+func validatePCAPNGOptions(file *os.File, start, end int64, order binary.ByteOrder, blockType uint32, idbMetadataBytes *uint64) error {
 	var optionHeader [4]byte
 	for pos := start; pos < end; {
 		if end-pos < 4 {
@@ -61,6 +63,18 @@ func validatePCAPNGOptions(file *os.File, start, end int64, order binary.ByteOrd
 		padded := (length + 3) &^ uint64(3)
 		if padded > uint64(end-pos-4) {
 			return fmt.Errorf("PCAPNG option at byte %d exceeds block boundary", pos)
+		}
+		// IDB strings and filters are retained by NgReader and serialized in
+		// JSON. Bound each option and the cumulative capture metadata before
+		// decoder allocation or JSON escaping can amplify untrusted strings.
+		if blockType == 1 {
+			if length > maxPCAPNGIDBOptionBytes {
+				return fmt.Errorf("PCAPNG interface option at byte %d exceeds %d-byte metadata field limit", pos, maxPCAPNGIDBOptionBytes)
+			}
+			if *idbMetadataBytes+length > maxPCAPNGIDBMetadataBytes {
+				return fmt.Errorf("capture exceeds %d-byte PCAPNG interface metadata budget", maxPCAPNGIDBMetadataBytes)
+			}
+			*idbMetadataBytes += length
 		}
 		// Only validate known options *interpreted* by the pinned reader.
 		// Other legal TLVs are opaque but must respect their envelope.
@@ -122,6 +136,10 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 	var snaplens []uint32
 	sections := 0
 	interfaces := 0
+	var idbMetadataBytes uint64
+	// The section-length field counts bytes after the Section Header Block.
+	// -1 in the on-wire signed value signifies unknown section length.
+	expectedSectionEnd := int64(-1)
 
 	for offset := int64(0); offset < size; {
 		if size-offset < int64(len(header)) {
@@ -132,6 +150,9 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 		}
 		isSection := bytes.Equal(header[:4], sectionMagic)
 		if isSection {
+			if expectedSectionEnd >= 0 && offset != expectedSectionEnd {
+				return 0, fmt.Errorf("PCAPNG section ends at byte %d, but next section begins at %d", expectedSectionEnd, offset)
+			}
 			sections++
 			if sections > maxPCAPNGSections {
 				return 0, fmt.Errorf("capture has more than %d PCAPNG sections", maxPCAPNGSections)
@@ -147,6 +168,8 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 			snaplens = nil // interface IDs restart in every section
 		} else if order == nil {
 			return 0, fmt.Errorf("PCAPNG starts without a section header at byte %d", offset)
+		} else if expectedSectionEnd >= 0 && offset >= expectedSectionEnd {
+			return 0, fmt.Errorf("PCAPNG block at byte %d occurs past declared section end %d", offset, expectedSectionEnd)
 		}
 
 		blockType := order.Uint32(header[:4])
@@ -176,10 +199,27 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 		if int64(blockLength) > size-offset {
 			return 0, fmt.Errorf("truncated PCAPNG block at byte %d: need %d bytes, have %d", offset, blockLength, size-offset)
 		}
+		if !isSection && expectedSectionEnd >= 0 && int64(blockLength) > expectedSectionEnd-offset {
+			return 0, fmt.Errorf("PCAPNG block at byte %d crosses declared section end %d", offset, expectedSectionEnd)
+		}
 
 		switch blockType {
 		case 0x0a0d0d0a: // Section header: 24-byte fixed data, then options
-			if err := validatePCAPNGOptions(file, offset+24, offset+int64(blockLength)-4, order, blockType); err != nil {
+			var lengthBytes [8]byte
+			if _, err := file.ReadAt(lengthBytes[:], offset+16); err != nil {
+				return 0, fmt.Errorf("read PCAPNG section length at byte %d: %w", offset, err)
+			}
+			declaredLength := order.Uint64(lengthBytes[:])
+			if declaredLength == ^uint64(0) {
+				expectedSectionEnd = -1
+			} else {
+				available := uint64(size - offset - int64(blockLength))
+				if declaredLength > available {
+					return 0, fmt.Errorf("PCAPNG section at byte %d declares %d bytes but only %d remain", offset, declaredLength, available)
+				}
+				expectedSectionEnd = offset + int64(blockLength) + int64(declaredLength)
+			}
+			if err := validatePCAPNGOptions(file, offset+24, offset+int64(blockLength)-4, order, blockType, &idbMetadataBytes); err != nil {
 				return 0, err
 			}
 		case 1: // Interface descriptor: 8-byte fixed data
@@ -192,11 +232,11 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 				return 0, fmt.Errorf("read interface descriptor: %w", err)
 			}
 			snaplens = append(snaplens, order.Uint32(desc[4:8]))
-			if err := validatePCAPNGOptions(file, offset+16, offset+int64(blockLength)-4, order, blockType); err != nil {
+			if err := validatePCAPNGOptions(file, offset+16, offset+int64(blockLength)-4, order, blockType, &idbMetadataBytes); err != nil {
 				return 0, err
 			}
 		case 5: // Interface statistics: 12-byte fixed data
-			if err := validatePCAPNGOptions(file, offset+20, offset+int64(blockLength)-4, order, blockType); err != nil {
+			if err := validatePCAPNGOptions(file, offset+20, offset+int64(blockLength)-4, order, blockType, &idbMetadataBytes); err != nil {
 				return 0, err
 			}
 		case 2, 6:
@@ -251,6 +291,9 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 			return 0, fmt.Errorf("PCAPNG block trailer mismatch at byte %d", offset)
 		}
 		offset += int64(blockLength)
+	}
+	if expectedSectionEnd >= 0 && expectedSectionEnd != size {
+		return 0, fmt.Errorf("PCAPNG ends at byte %d but section declares end at %d", size, expectedSectionEnd)
 	}
 	return size, nil
 }

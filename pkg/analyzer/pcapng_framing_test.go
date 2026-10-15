@@ -198,3 +198,85 @@ func TestPCAPNGFramingCapsSectionAndInterfaceMetadata(t *testing.T) {
 		t.Fatalf("unbounded PCAPNG interface entries accepted: %v", err)
 	}
 }
+
+func TestPCAPNGFramingHonorsFiniteSectionLengths(t *testing.T) {
+	path, valid := makeQualityFixture(t, true, []gopacket.CaptureInfo{{
+		Timestamp: time.Unix(1000, 0), CaptureLength: 60, Length: 60,
+	}})
+	shbSize := binary.LittleEndian.Uint32(valid[4:8])
+	if shbSize < 28 || int(shbSize) >= len(valid) {
+		t.Fatalf("invalid fixture SHB size: %d", shbSize)
+	}
+	actual := uint64(len(valid) - int(shbSize))
+	for _, tc := range []struct {
+		name     string
+		declared uint64
+		valid    bool
+	}{
+		{"exact boundary", actual, true},
+		{"shorter than block data", actual - 1, false},
+		{"past file end", actual + 1, false},
+		{"empty section with blocks", 0, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := append([]byte(nil), valid...)
+			binary.LittleEndian.PutUint64(data[16:24], tc.declared)
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			_, err := InspectCapture(path)
+			if tc.valid && err != nil {
+				t.Fatalf("valid finite section was rejected: %v", err)
+			}
+			if !tc.valid && err == nil {
+				t.Fatal("PCAPNG ignored a mismatched finite section length")
+			}
+		})
+	}
+}
+
+func TestPCAPNGFramingLimitsRetainedInterfaceOptionBytes(t *testing.T) {
+	path, valid := makeQualityFixture(t, true, []gopacket.CaptureInfo{{
+		Timestamp: time.Unix(1000, 0), CaptureLength: 60, Length: 60,
+	}})
+	makeIDB := func(size int) []byte {
+		body := make([]byte, 8+4+((size+3)&^3))
+		binary.LittleEndian.PutUint16(body[0:2], 1)
+		binary.LittleEndian.PutUint32(body[4:8], 65535)
+		binary.LittleEndian.PutUint16(body[8:10], 2)
+		binary.LittleEndian.PutUint16(body[10:12], uint16(size))
+		for i := 0; i < size; i++ {
+			body[12+i] = 'a'
+		}
+		return framedPCAPNGBlock(1, body)
+	}
+	oversized := append(append([]byte(nil), valid...), makeIDB(maxPCAPNGIDBOptionBytes+1)...)
+	if err := os.WriteFile(path, oversized, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectCapture(path); err == nil || !strings.Contains(err.Error(), "metadata field limit") {
+		t.Fatalf("oversized PCAPNG IDB option accepted: %v", err)
+	}
+
+	// Several individually permitted IDB names can still exceed the total
+	// capture metadata budget within the section/interface count limits.
+	var shbBody [16]byte
+	binary.LittleEndian.PutUint32(shbBody[:4], 0x1a2b3c4d)
+	binary.LittleEndian.PutUint16(shbBody[4:6], 1)
+	binary.LittleEndian.PutUint64(shbBody[8:16], ^uint64(0))
+	section := framedPCAPNGBlock(0x0a0d0d0a, shbBody[:])
+	idb := makeIDB(maxPCAPNGIDBOptionBytes)
+	data := append([]byte(nil), valid...)
+	for s := 0; s < 3; s++ {
+		data = append(data, section...)
+		for i := 0; i < maxPCAPNGPerSectionIDs; i++ {
+			data = append(data, idb...)
+		}
+	}
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectCapture(path); err == nil || !strings.Contains(err.Error(), "metadata budget") {
+		t.Fatalf("cumulative PCAPNG IDB metadata amplification accepted: %v", err)
+	}
+}

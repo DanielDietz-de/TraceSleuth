@@ -34,6 +34,10 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
 
 ### Review hardening
 
+- Ensure CLI configuration, processing, integrity and JSON encoding failures
+  remove the private capture snapshot before process exit.
+- Enforce finite PCAPNG section lengths and reject malformed section extents;
+  bound per-field and total retained interface metadata before decoding.
 - Pin preflight and detector processing to one open capture descriptor,
   verifying the SHA-256 identity before and after packet analysis to reject
   captures modified in place or replaced between passes.

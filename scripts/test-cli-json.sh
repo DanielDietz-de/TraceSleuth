@@ -15,6 +15,7 @@ trap 'rm -rf -- "$tmp"' EXIT
 python3 - "$binary" "$tmp" <<'PY'
 import hashlib
 import json
+import os
 from pathlib import Path
 import struct
 import subprocess
@@ -78,6 +79,25 @@ for flags in (["-json"], ["-json", "-unknown-flag"], ["-unknown-flag", "-json"])
     assert failed.returncode != 0, f"{flags} unexpectedly succeeded"
     assert failed.stdout == "", f"{flags} contaminated JSON stdout: {failed.stdout[:500]!r}"
     assert failed.stderr, f"{flags} did not report a diagnostic on stderr"
+
+# A failure after preflight must not strand private sensitive PCAP bytes.
+private_tmp = tmp / "private-snapshots"
+private_tmp.mkdir()
+env = dict(os.environ, TMPDIR=str(private_tmp))
+failed_config = subprocess.run(
+    [binary, "-json", "-config", str(tmp / "missing-thresholds.yml"), str(pcap)],
+    cwd=tmp, env=env, capture_output=True, text=True, timeout=40, check=False,
+)
+assert failed_config.returncode != 0 and "Error loading config" in failed_config.stderr
+assert failed_config.stdout == "", "config error contaminated JSON output"
+assert not list(private_tmp.glob("tracesleuth-capture-*")), "failed CLI left sensitive working copy"
+good_snapshot = subprocess.run(
+    [binary, "-json", str(pcap)], cwd=tmp, env=env,
+    capture_output=True, text=True, timeout=40, check=False,
+)
+assert good_snapshot.returncode == 0, good_snapshot.stderr
+assert json.loads(good_snapshot.stdout)["capture_quality"]["packet_count"] == 1
+assert not list(private_tmp.glob("tracesleuth-capture-*")), "successful CLI left working copy"
 
 # A second PCAP that contains one valid record and then an incompletely
 # captured record must not yield a plausible comparison over its prefix.

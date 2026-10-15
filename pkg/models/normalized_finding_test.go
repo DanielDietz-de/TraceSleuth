@@ -26,8 +26,8 @@ func validAlphaFinding(t *testing.T) DiagnosticFinding {
 	return DiagnosticFinding{
 		ID: id, DetectorID: "lacp.partner_instability",
 		DetectorVersion: "1.0", SchemaVersion: NormalizedFindingSchemaVersion,
-		Title: "LACP partner system identity changed",
-		Summary: "A directly decoded partner field changed during the observed interval.",
+		Title:    "LACP partner system identity changed",
+		Summary:  "A directly decoded partner field changed during the observed interval.",
 		Category: "redundancy", Severity: SeverityMedium, Certainty: CertaintyProbable,
 		Confidence: ExplainedConfidence{
 			Base: 50,
@@ -44,9 +44,9 @@ func validAlphaFinding(t *testing.T) DiagnosticFinding {
 			{ID: "evidence-2", Kind: "capture_quality", Description: "Single-sided capture"},
 		},
 		AlternativeExplanations: []string{"Capture duplication or monitor port reconfiguration"},
-		CaptureLimitations: []string{"Capture observes only one side of the link"},
-		WiresharkFilters: []string{"eth.type == 0x8809"},
-		RecommendedValidation: []string{"Inspect packet 1289 in the original capture with Wireshark"},
+		CaptureLimitations:      []string{"Capture observes only one side of the link"},
+		WiresharkFilters:        []string{"eth.type == 0x8809"},
+		RecommendedValidation:   []string{"Inspect packet 1289 in the original capture with Wireshark"},
 	}
 }
 

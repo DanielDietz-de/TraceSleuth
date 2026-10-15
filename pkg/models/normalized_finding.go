@@ -44,6 +44,7 @@ type PacketSourceReference struct {
 	CaptureID          string            `json:"capture_id"`
 	PacketNumber       uint64            `json:"packet_number"`
 	Timestamp          *time.Time        `json:"timestamp,omitempty"`
+	CaptureSectionIndex *int              `json:"capture_section_index,omitempty"`
 	CaptureInterfaceID *int              `json:"capture_interface_id,omitempty"`
 	CapturePointLabel  string            `json:"capture_point_label,omitempty"`
 	Reason             string            `json:"reason"`
@@ -145,6 +146,12 @@ func validPacketSource(p PacketSourceReference) error {
 	if strings.TrimSpace(p.CaptureID) == "" || p.PacketNumber == 0 || strings.TrimSpace(p.Reason) == "" {
 		return errors.New("untraceable packet source reference")
 	}
+	if (p.CaptureInterfaceID == nil) != (p.CaptureSectionIndex == nil) {
+		return errors.New("packet source must specify capture section and interface together")
+	}
+	if p.CaptureSectionIndex != nil && *p.CaptureSectionIndex < 0 {
+		return errors.New("negative capture section identifier")
+	}
 	if p.CaptureInterfaceID != nil && *p.CaptureInterfaceID < 0 {
 		return errors.New("negative capture interface identifier")
 	}
@@ -221,6 +228,11 @@ func (f DiagnosticFinding) Validate() error {
 		if strings.TrimSpace(ev.ID) == "" || strings.TrimSpace(ev.Kind) == "" ||
 			strings.TrimSpace(ev.Description) == "" {
 			return errors.New("evidence lacks identity, type or description")
+		}
+		// Reject whitespace aliases rather than letting them bypass the
+		// type-specific validation for packet and metric evidence.
+		if ev.Kind != strings.TrimSpace(ev.Kind) {
+			return fmt.Errorf("evidence %q has a non-canonical kind %q", ev.ID, ev.Kind)
 		}
 		if _, exists := evidenceByID[ev.ID]; exists {
 			return fmt.Errorf("duplicate evidence ID %q", ev.ID)
@@ -318,23 +330,41 @@ func StableFindingID(detectorID, detectorVersion, category string, refs []Packet
 		CaptureID          string            `json:"capture_id"`
 		PacketNumber       uint64            `json:"packet_number"`
 		Timestamp          *time.Time        `json:"timestamp,omitempty"`
+		CaptureSectionIndex *int              `json:"capture_section_index,omitempty"`
 		CaptureInterfaceID *int              `json:"capture_interface_id,omitempty"`
 		RelevantFields     map[string]string `json:"relevant_fields,omitempty"`
 	}
 	canonical := make([]string, 0, len(refs))
+	seenCanonical := make(map[string]struct{}, len(refs))
 	for _, p := range refs {
 		if p.CaptureID == "" || p.PacketNumber == 0 {
 			return "", errors.New("cannot identify an untraceable packet")
 		}
+		if (p.CaptureInterfaceID == nil) != (p.CaptureSectionIndex == nil) {
+			return "", errors.New("packet identity requires section and interface together")
+		}
+		// A timestamp represents an instant, not its display timezone.
+		// JSON would otherwise hash equal instants differently by offset.
+		var timestamp *time.Time
+		if p.Timestamp != nil {
+			utc := p.Timestamp.UTC()
+			timestamp = &utc
+		}
 		src, err := json.Marshal(sourceIdentity{
 			CaptureID: p.CaptureID, PacketNumber: p.PacketNumber,
-			Timestamp: p.Timestamp, CaptureInterfaceID: p.CaptureInterfaceID,
+			Timestamp: timestamp, CaptureSectionIndex: p.CaptureSectionIndex,
+			CaptureInterfaceID: p.CaptureInterfaceID,
 			RelevantFields: p.RelevantFields,
 		})
 		if err != nil {
 			return "", fmt.Errorf("marshal packet identity: %w", err)
 		}
-		canonical = append(canonical, string(src))
+		key := string(src)
+		if _, duplicate := seenCanonical[key]; duplicate {
+			continue // repeated packet reasons are not new source evidence
+		}
+		seenCanonical[key] = struct{}{}
+		canonical = append(canonical, key)
 	}
 	sort.Strings(canonical)
 	blob, err := json.Marshal(struct {

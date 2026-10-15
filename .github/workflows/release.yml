@@ -32,7 +32,7 @@ jobs:
   release:
     name: Build and release TraceSleuth
     if: >-
-      github.ref_type == 'tag' ||
+      (github.event_name == 'push' && github.ref_type == 'tag') ||
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main' &&
        startsWith(github.event.head_commit.message, 'release: v'))
@@ -55,7 +55,7 @@ jobs:
           set -euo pipefail
           version="$(tr -d '\r\n' < VERSION)"
           expected="v${version}"
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == push && "$GITHUB_REF" == refs/tags/* ]]; then
             tag="${GITHUB_REF#refs/tags/}"
           elif [[ "$GITHUB_REF" == refs/heads/main && "$GITHUB_EVENT_NAME" == workflow_dispatch ]]; then
             tag="$expected"

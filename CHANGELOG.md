@@ -6,6 +6,10 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
 
 ## [Unreleased]
 
+### Added (experimental; not a stable API)
+
+- Introduce a normalized finding/packet evidence Go contract (`0.1.0-alpha`) with explicit certainty, structured packet source references, reproducible finding IDs, evidence-backed confidence adjustments and strict validation tests. Detector migration and public JSON/API stabilization remain open Phase 3 work.
+
 ### Planned
 
 - Complete remaining product-identity migration for inherited runtime source paths, frontend strings, API metadata, and configuration/storage names.

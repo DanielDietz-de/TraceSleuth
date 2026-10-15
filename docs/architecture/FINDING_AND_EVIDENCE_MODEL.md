@@ -59,7 +59,7 @@ references
 tags
 ```
 
-The exact Go types and JSON schema will be versioned when implemented.
+An **experimental**, non-public Go contract is implemented in `pkg/models/normalized_finding.go` with schema marker `0.1.0-alpha`. It validates packet provenance, time ranges, explicit evidence and explainable confidence and exposes deterministic instance IDs. This is only the first Phase 3 infrastructure increment: no priority detector currently emits the normalized structure as its primary output, the legacy report remains authoritative, and neither JSON/API stability nor full detector migration is claimed. The acceptance criteria for Phase 3 remain open.
 
 ## Stable IDs
 
@@ -67,7 +67,7 @@ The exact Go types and JSON schema will be versioned when implemented.
 
 A finding ID identifies a concrete finding instance within an analysis. It should be stable for deterministic golden tests when the same input/configuration yields the same semantic finding.
 
-Do not derive IDs from Go map order, random numbers or presentation text alone.
+Do not derive IDs from Go map order, random numbers or presentation text alone. The alpha validator recomputes the deterministic instance ID from the detector identifier/version, category and packet-source references and rejects stale IDs after those fields change.
 
 ### Detector ID
 
@@ -158,6 +158,8 @@ A confidence explanation should be representable as:
 
 The exact contribution values are detector/correlation-policy decisions and require tests. Arbitrary arithmetic without calibration is prohibited.
 
+The experimental alpha validator rejects non-finite measurements (including values attached to packet observations), requires finite metric values with units, and permits each independent evidence family to contribute only once. Whitespace aliases of family names are treated as the same family. Different evidence IDs that cite the same capture ID and packet number **cannot** be counted as independent confidence families, even if their descriptions or selected protocol fields differ. This is intentionally conservative; a detector must provide truly independent observations rather than relabeling the same packet.
+
 ## Status
 
 Recommended lifecycle values:
@@ -183,7 +185,7 @@ duration
 
 Single-packet observations may have identical `first_seen` and `last_seen`.
 
-Time precision must reflect actual capture timestamp precision and clock confidence.
+Time precision must reflect actual capture timestamp precision and clock confidence. The alpha model rejects absent/zero observation times and timestamps that cannot be serialized as JSON; it does not fabricate missing packet timestamps.
 
 ## Affected entities
 

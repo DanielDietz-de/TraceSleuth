@@ -280,3 +280,80 @@ func TestPCAPNGFramingLimitsRetainedInterfaceOptionBytes(t *testing.T) {
 		t.Fatalf("cumulative PCAPNG IDB metadata amplification accepted: %v", err)
 	}
 }
+
+// A zero-length recognized field is not safe with the pinned NgReader: it
+// reuses an option buffer, allowing one large field to be retained for many
+// subsequent interfaces. Reject the block before the third-party decoder.
+func TestPCAPNGFramingRejectsZeroLengthRetainedOptionAfterPriorValue(t *testing.T) {
+	path, valid := makeQualityFixture(t, true, []gopacket.CaptureInfo{{
+		Timestamp: time.Unix(1000, 0), CaptureLength: 60, Length: 60,
+	}})
+	body := make([]byte, 8+4+4+4)
+	binary.LittleEndian.PutUint16(body[0:2], 1) // Ethernet
+	binary.LittleEndian.PutUint32(body[4:8], 65535)
+	binary.LittleEndian.PutUint16(body[8:10], 2999) // nonempty unknown option
+	binary.LittleEndian.PutUint16(body[10:12], 4)
+	copy(body[12:16], []byte("test"))
+	binary.LittleEndian.PutUint16(body[16:18], 2) // if_name: zero length
+	data := append(append([]byte(nil), valid...), framedPCAPNGBlock(1, body)...)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectCapture(path); err == nil || !strings.Contains(err.Error(), "zero-length PCAPNG option") {
+		t.Fatalf("zero-length interface name was not rejected: %v", err)
+	}
+	if _, err := NewComparator(false).Compare(path, path); err == nil {
+		t.Fatal("comparator accepted zero-length interface metadata")
+	}
+}
+
+// Large runs of zeros after an option terminator must not trigger one syscall
+// per four bytes. The accepted padding budget keeps preflight proportional to
+// useful capture metadata and prevents CPU-based upload denial of service.
+func TestPCAPNGFramingCapsTrailingOptionPadding(t *testing.T) {
+	path, valid := makeQualityFixture(t, true, []gopacket.CaptureInfo{{
+		Timestamp: time.Unix(1000, 0), CaptureLength: 60, Length: 60,
+	}})
+	buildIDB := func(padding int) []byte {
+		body := make([]byte, 8+4+padding)
+		binary.LittleEndian.PutUint16(body[:2], 1)
+		binary.LittleEndian.PutUint32(body[4:8], 65535)
+		// The four zero bytes at [8:12] are the legal end-of-options marker.
+		return framedPCAPNGBlock(1, body)
+	}
+	for _, tc := range []struct {
+		name    string
+		padding int
+		valid   bool
+	}{
+		{"bounded zeros", maxPCAPNGTrailingOptionPaddingBytes, true},
+		{"excessive zeros", maxPCAPNGTrailingOptionPaddingBytes + 4, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := append(append([]byte(nil), valid...), buildIDB(tc.padding)...)
+			if err := os.WriteFile(path, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			f, err := os.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = validatePCAPNGBlockFraming(f)
+			_ = f.Close()
+			if tc.valid && err != nil {
+				t.Fatalf("valid bounded option padding rejected: %v", err)
+			}
+			if !tc.valid && (err == nil || !strings.Contains(err.Error(), "padding")) {
+				t.Fatalf("excessive option padding accepted: %v", err)
+			}
+			if !tc.valid {
+				if _, err := InspectCapture(path); err == nil {
+					t.Fatal("preflight accepted excessive padding")
+				}
+				if _, err := NewComparator(false).Compare(path, path); err == nil {
+					t.Fatal("comparator accepted excessive padding")
+				}
+			}
+		})
+	}
+}

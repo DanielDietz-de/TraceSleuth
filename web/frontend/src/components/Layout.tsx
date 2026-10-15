@@ -65,7 +65,7 @@ export function Layout({ children }: LayoutProps) {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center justify-between h-16">
             {/* Logo */}
-            <Link to="/" className="flex items-center gap-3">
+            <Link to="/" aria-label="TraceSleuth home" className="flex items-center gap-3">
               <div aria-hidden="true" className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-600 text-white">
                 <Network className="h-6 w-6" />
               </div>

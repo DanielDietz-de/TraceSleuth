@@ -733,3 +733,118 @@ func TestInspectCaptureTruncatedDepthNotMaskedByFullSizedFrame(t *testing.T) {
 		})
 	}
 }
+
+// The digest must stop after one byte beyond the immutable snapshot size,
+// even for a reader whose producer never reaches EOF.
+type endlesslyGrowingCaptureReader struct {
+	bytesRead int64
+}
+
+func (r *endlesslyGrowingCaptureReader) Read(p []byte) (int, error) {
+	for i := range p {
+		p[i] = 0x42
+	}
+	r.bytesRead += int64(len(p))
+	return len(p), nil
+}
+
+func TestCaptureIdentityDigestIsBoundedForGrowingInput(t *testing.T) {
+	reader := &endlesslyGrowingCaptureReader{}
+	n, _, err := hashCaptureWithinLimit(reader, 128)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n != 129 || reader.bytesRead != 129 {
+		t.Fatalf("unbounded capture read: copied %d, consumed %d, expected 129", n, reader.bytesRead)
+	}
+}
+
+func TestPreflightRejectsEmptyCapturedPacketRecords(t *testing.T) {
+	pcapPath, pcap := makeQualityFixture(t, false, []gopacket.CaptureInfo{{
+		Timestamp: time.Unix(1000, 0), CaptureLength: 60, Length: 60,
+	}})
+	// A classic-PCAP packet header with no retained bytes and no wire bytes
+	// cannot prove the advertised Ethernet/control-plane capability.
+	zeroPCAP := append([]byte(nil), pcap[:40]...)
+	binary.LittleEndian.PutUint32(zeroPCAP[32:36], 0)
+	binary.LittleEndian.PutUint32(zeroPCAP[36:40], 0)
+	if err := os.WriteFile(pcapPath, zeroPCAP, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectCapture(pcapPath); err == nil {
+		t.Fatal("zero-byte classic-PCAP record passed preflight")
+	}
+	if _, err := NewComparator(false).Compare(pcapPath, pcapPath); err == nil {
+		t.Fatal("zero-byte classic-PCAP record passed comparison")
+	}
+
+	pcapngPath, pcapng := makeQualityFixture(t, true, []gopacket.CaptureInfo{{
+		Timestamp: time.Unix(1000, 0), CaptureLength: 60, Length: 60,
+	}})
+	for _, tc := range []struct {
+		name  string
+		block []byte
+	}{
+		{"EPB", framedPCAPNGBlock(6, make([]byte, 20))},
+		{"simple packet", framedPCAPNGBlock(3, make([]byte, 4))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			data := append(append([]byte(nil), pcapng...), tc.block...)
+			if err := os.WriteFile(pcapngPath, data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := InspectCapture(pcapngPath); err == nil {
+				t.Fatal("zero-byte PCAPNG packet record accepted")
+			}
+			if _, err := NewComparator(false).Compare(pcapngPath, pcapngPath); err == nil {
+				t.Fatal("zero-byte PCAPNG packet record accepted by comparison")
+			}
+		})
+	}
+}
+
+func TestInspectCaptureRetainsKnownDropsAcrossStatisticsBlocks(t *testing.T) {
+	var buffer bytes.Buffer
+	writer, err := pcapgo.NewNgWriter(&buffer, layers.LinkTypeEthernet)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame := make([]byte, 60)
+	if err := writer.WritePacket(gopacket.CaptureInfo{
+		Timestamp: time.Unix(1000, 0), CaptureLength: 60, Length: 60,
+	}, frame); err != nil {
+		t.Fatal(err)
+	}
+	for _, dropCount := range []uint64{11, pcapgo.NgNoValue64, 6} {
+		if err := writer.WriteInterfaceStats(0, pcapgo.NgInterfaceStatistics{
+			LastUpdate: time.Unix(1001, 0), PacketsDropped: dropCount,
+			PacketsReceived: pcapgo.NgNoValue64,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(t.TempDir(), "stats-cumulative.pcapng")
+	if err := os.WriteFile(path, buffer.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	quality, err := InspectCapture(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(quality.Interfaces) != 1 || quality.Interfaces[0].ReportedDrops == nil ||
+		*quality.Interfaces[0].ReportedDrops != 11 {
+		t.Fatalf("previous known drops were lost across ISBs: %+v", quality.Interfaces)
+	}
+	found := false
+	for _, issue := range quality.Limitations {
+		if issue.Code == "capture_reported_drops" && issue.Count == 11 {
+			found = true
+		}
+	}
+	if !found || quality.Status != "degraded" {
+		t.Fatalf("drop observation lost after later ISBs: %+v", quality)
+	}
+}

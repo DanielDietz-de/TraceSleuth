@@ -457,6 +457,14 @@ For more information and documentation:
 		os.Exit(1)
 	}
 	defer capHandle.Close()
+	// os.Exit skips defers. Explicitly remove the sensitive working capture
+	// before exiting any error path after snapshot creation.
+	exitAfterCapture := func(code int) {
+		if closeErr := capHandle.Close(); closeErr != nil {
+			fmt.Fprintf(os.Stderr, "Error cleaning private capture snapshot: %v\n", closeErr)
+		}
+		os.Exit(code)
+	}
 	reader := capHandle.Reader
 
 	if *verbose {
@@ -474,7 +482,7 @@ For more information and documentation:
 	thresholds, err := config.LoadThresholds(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
+		exitAfterCapture(1)
 	}
 
 	// Create processor and analyze
@@ -501,11 +509,11 @@ For more information and documentation:
 
 	if err := processor.Process(reader, state, report, filter); err != nil {
 		fmt.Fprintf(os.Stderr, "Error processing PCAP: %v\n", err)
-		os.Exit(1)
+		exitAfterCapture(1)
 	}
 	if err := analyzer.VerifyCaptureHandle(capHandle, quality); err != nil {
 		fmt.Fprintf(os.Stderr, "Capture identity check failed after analysis: %v\n", err)
-		os.Exit(1)
+		exitAfterCapture(1)
 	}
 
 	// Output results
@@ -514,7 +522,7 @@ For more information and documentation:
 		encoder.SetIndent("", "  ")
 		if err := encoder.Encode(report); err != nil {
 			fmt.Fprintf(os.Stderr, "Error encoding JSON: %v\n", err)
-			os.Exit(1)
+			exitAfterCapture(1)
 		}
 	} else if *simpleOutput {
 		// Print plain English report for non-technical users

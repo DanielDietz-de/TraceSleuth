@@ -34,6 +34,12 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
 
 ### Review hardening
 
+- Limit both working-copy and source hash verification to one byte beyond the
+  frozen snapshot size, preventing unbounded reads of a growing source.
+- Reject zero-captured-length packet records in classic PCAP and PCAPNG rather
+  than counting them as diagnostic evidence or granting protocol capabilities.
+- Preserve the highest known interface drop counter across all PCAPNG
+  statistics blocks, even if later blocks omit the counter.
 - Ensure CLI configuration, processing, integrity and JSON encoding failures
   remove the private capture snapshot before process exit.
 - Enforce finite PCAPNG section lengths and reject malformed section extents;

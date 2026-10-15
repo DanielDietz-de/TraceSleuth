@@ -124,7 +124,10 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 	anyCaptureFilter := false
 	// An interface without an Interface Statistics Block has UNKNOWN drops,
 	// not a reported zero. The reader initializes absent stats to zero values.
-	statsObserved := map[int]bool{}
+	// Keep the maximum known drop count from ALL statistics blocks.
+	// NgReader replaces its per-interface statistics on each ISB, so a
+	// later block with an omitted counter must not erase an earlier loss.
+	reportedDrops := map[int]uint64{}
 
 	// NgReader's interface indices restart at each section. Its callback
 	// supplies the completed section before clearing the old interface list.
@@ -150,8 +153,7 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 					Description: fmt.Sprintf("Capture section %d interface %d used a packet filter. Protocols excluded by the filter are not observable.", section, idx),
 				})
 			}
-			if statsObserved[idx] && iface.Statistics.PacketsDropped != pcapgo.NgNoValue64 {
-				drops := iface.Statistics.PacketsDropped
+			if drops, known := reportedDrops[idx]; known {
 				info.ReportedDrops = &drops
 				if drops > 0 {
 					q.Limitations = append(q.Limitations, models.CaptureQualityIssue{
@@ -167,7 +169,7 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 		interfacePackets = make(map[int]uint64)
 		interfaceTruncatedDepth = make(map[int]uint32)
 		interfaceTruncated = make(map[int]bool)
-		statsObserved = make(map[int]bool)
+		reportedDrops = make(map[int]uint64)
 	}
 
 	// SectionEndCallback does not fire for the final section on EOF.
@@ -176,8 +178,13 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 		SectionEndCallback: func(ifaces []pcapgo.NgInterface, _ pcapgo.NgSectionInfo) {
 			finishSection(ifaces)
 		},
-		StatisticsCallback: func(index int, _ pcapgo.NgInterfaceStatistics) {
-			statsObserved[index] = true
+		StatisticsCallback: func(index int, stats pcapgo.NgInterfaceStatistics) {
+			if stats.PacketsDropped == pcapgo.NgNoValue64 {
+				return
+			}
+			if existing, seen := reportedDrops[index]; !seen || stats.PacketsDropped > existing {
+				reportedDrops[index] = stats.PacketsDropped
+			}
 		},
 	}
 	parsed, err := openCaptureOnFile(file, opts)
@@ -353,6 +360,18 @@ func InspectCaptureAndOpen(path string) (*models.CaptureQuality, *CaptureHandle,
 	return q, cap, nil
 }
 
+// hashCaptureWithinLimit reads at most expected+1 bytes, even if the source
+// is continuously being appended by another process. The extra byte detects
+// an append without letting untrusted input stall capture verification.
+func hashCaptureWithinLimit(source io.Reader, expected int64) (int64, string, error) {
+	if expected < 0 || expected > maxSnapshotBytes {
+		return 0, "", fmt.Errorf("invalid capture identity length %d", expected)
+	}
+	hash := sha256.New()
+	n, err := io.Copy(hash, io.LimitReader(source, expected+1))
+	return n, hex.EncodeToString(hash.Sum(nil)), err
+}
+
 // VerifyCaptureHandle checks both the byte count and content SHA-256 on the
 // original descriptor. It intentionally invalidates the reader position and
 // must only be called after a preflight/analysis pass is complete.
@@ -363,24 +382,22 @@ func VerifyCaptureHandle(cap *CaptureHandle, quality *models.CaptureQuality) err
 	if _, err := cap.File.Seek(0, io.SeekStart); err != nil {
 		return fmt.Errorf("rewind for identity verification: %w", err)
 	}
-	sum := sha256.New()
-	n, err := io.Copy(sum, cap.File)
+	n, digest, err := hashCaptureWithinLimit(cap.File, quality.FileSizeBytes)
 	if err != nil {
 		return fmt.Errorf("verify capture hash: %w", err)
 	}
-	if n != quality.FileSizeBytes || hex.EncodeToString(sum.Sum(nil)) != quality.SHA256 {
+	if n != quality.FileSizeBytes || digest != quality.SHA256 {
 		return fmt.Errorf("capture working copy differs from preflight digest")
 	}
 	if cap.SourceFile != nil {
 		if _, err := cap.SourceFile.Seek(0, io.SeekStart); err != nil {
 			return fmt.Errorf("rewind original capture for identity verification: %w", err)
 		}
-		originalHash := sha256.New()
-		originalSize, err := io.Copy(originalHash, cap.SourceFile)
+		originalSize, originalDigest, err := hashCaptureWithinLimit(cap.SourceFile, quality.FileSizeBytes)
 		if err != nil {
 			return fmt.Errorf("hash original capture: %w", err)
 		}
-		if originalSize != quality.FileSizeBytes || hex.EncodeToString(originalHash.Sum(nil)) != quality.SHA256 {
+		if originalSize != quality.FileSizeBytes || originalDigest != quality.SHA256 {
 			return fmt.Errorf("original capture changed during analysis")
 		}
 	}

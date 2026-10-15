@@ -260,7 +260,7 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 			if snap := snaplens[interfaceID]; snap != 0 && captured > uint64(snap) {
 				return 0, fmt.Errorf("PCAPNG captured packet exceeds interface snaplen at byte %d", offset)
 			}
-			if captured > maxPCAPNGPacketBytes || captured > original ||
+			if captured == 0 || captured > maxPCAPNGPacketBytes || captured > original ||
 				uint64(blockLength) < 32+padded {
 				return 0, fmt.Errorf("invalid PCAPNG packet length at byte %d: captured=%d original=%d block=%d", offset, captured, original, blockLength)
 			}
@@ -279,7 +279,7 @@ func validatePCAPNGBlockFraming(file *os.File) (int64, error) {
 				captured = uint64(snaplens[0])
 			}
 			padded := (captured + 3) &^ uint64(3)
-			if captured > maxPCAPNGPacketBytes || uint64(blockLength) != 16+padded {
+			if captured == 0 || captured > maxPCAPNGPacketBytes || uint64(blockLength) != 16+padded {
 				return 0, fmt.Errorf("invalid PCAPNG simple packet size at byte %d", offset)
 			}
 		}

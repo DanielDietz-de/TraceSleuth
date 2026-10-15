@@ -83,6 +83,11 @@ func (c ExplainedConfidence) Calculated() (int, error) {
 	if len(c.Adjustments) == 0 {
 		return 0, errors.New("confidence has no documented contributions or penalties")
 	}
+	// Bounded, detector-defined contributions prevent integer overflow from
+	// hostile configurations or unexpectedly large evidence fan-out.
+	if len(c.Adjustments) > 1024 {
+		return 0, errors.New("too many confidence adjustments")
+	}
 	sum := c.Base
 	seen := make(map[string]struct{}, len(c.Adjustments))
 	for _, v := range c.Adjustments {
@@ -93,6 +98,9 @@ func (c ExplainedConfidence) Calculated() (int, error) {
 			return 0, fmt.Errorf("duplicate evidence family %q", v.EvidenceFamily)
 		}
 		seen[v.EvidenceFamily] = struct{}{}
+		if v.Delta < -100 || v.Delta > 100 {
+			return 0, fmt.Errorf("confidence contribution %d outside -100..100", v.Delta)
+		}
 		sum += v.Delta
 	}
 	if sum < 0 {
@@ -177,6 +185,9 @@ func (f DiagnosticFinding) Validate() error {
 		}
 	}
 	for _, adj := range f.Confidence.Adjustments {
+		if len(adj.EvidenceIDs) == 0 {
+			return fmt.Errorf("confidence family %q lacks supporting evidence IDs", adj.EvidenceFamily)
+		}
 		for _, id := range adj.EvidenceIDs {
 			if _, ok := evidenceIDs[id]; !ok {
 				return fmt.Errorf("confidence adjustment references unknown evidence %q", id)
@@ -207,26 +218,38 @@ func StableFindingID(detectorID, detectorVersion, category string, refs []Packet
 	if detectorID == "" || detectorVersion == "" || category == "" || len(refs) == 0 {
 		return "", errors.New("finding identity requires detector and packet references")
 	}
-	canonical := append([]PacketSourceReference(nil), refs...)
-	for _, p := range canonical {
+	// Serialize only machine-semantic identifiers. Human-language reasons
+	// and localized presentation text must never change finding identity.
+	// JSON sorts map keys; sorting the serialized references also handles
+	// otherwise-equal packet IDs with different observed protocol fields.
+	type sourceIdentity struct {
+		CaptureID          string            `json:"capture_id"`
+		PacketNumber       uint64            `json:"packet_number"`
+		Timestamp          *time.Time        `json:"timestamp,omitempty"`
+		CaptureInterfaceID *int              `json:"capture_interface_id,omitempty"`
+		RelevantFields     map[string]string `json:"relevant_fields,omitempty"`
+	}
+	canonical := make([]string, 0, len(refs))
+	for _, p := range refs {
 		if p.CaptureID == "" || p.PacketNumber == 0 {
 			return "", errors.New("cannot identify an untraceable packet")
 		}
+		src, err := json.Marshal(sourceIdentity{
+			CaptureID: p.CaptureID, PacketNumber: p.PacketNumber,
+			Timestamp: p.Timestamp, CaptureInterfaceID: p.CaptureInterfaceID,
+			RelevantFields: p.RelevantFields,
+		})
+		if err != nil {
+			return "", fmt.Errorf("marshal packet identity: %w", err)
+		}
+		canonical = append(canonical, string(src))
 	}
-	sort.Slice(canonical, func(i, j int) bool {
-		if canonical[i].CaptureID != canonical[j].CaptureID {
-			return canonical[i].CaptureID < canonical[j].CaptureID
-		}
-		if canonical[i].PacketNumber != canonical[j].PacketNumber {
-			return canonical[i].PacketNumber < canonical[j].PacketNumber
-		}
-		return canonical[i].Reason < canonical[j].Reason
-	})
+	sort.Strings(canonical)
 	blob, err := json.Marshal(struct {
-		DetectorID      string                  `json:"detector_id"`
-		DetectorVersion string                  `json:"detector_version"`
-		Category        string                  `json:"category"`
-		Packets         []PacketSourceReference `json:"packets"`
+		DetectorID      string   `json:"detector_id"`
+		DetectorVersion string   `json:"detector_version"`
+		Category        string   `json:"category"`
+		Packets         []string `json:"packets"`
 	}{detectorID, detectorVersion, category, canonical})
 	if err != nil {
 		return "", fmt.Errorf("marshal finding identity: %w", err)

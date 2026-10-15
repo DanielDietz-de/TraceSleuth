@@ -146,6 +146,10 @@ func validPacketSource(p PacketSourceReference) error {
 	if strings.TrimSpace(p.CaptureID) == "" || p.PacketNumber == 0 || strings.TrimSpace(p.Reason) == "" {
 		return errors.New("untraceable packet source reference")
 	}
+	// Capture aliases must not bypass packet-evidence deduplication.
+	if p.CaptureID != strings.TrimSpace(p.CaptureID) {
+		return errors.New("non-canonical capture identifier")
+	}
 	if (p.CaptureInterfaceID == nil) != (p.CaptureSectionIndex == nil) {
 		return errors.New("packet source must specify capture section and interface together")
 	}
@@ -209,6 +213,19 @@ func (f DiagnosticFinding) Validate() error {
 	if score != f.Confidence.Final {
 		return fmt.Errorf("unexplained confidence: calculated %d, stored %d", score, f.Confidence.Final)
 	}
+	// A single positive observation and a penalty cannot establish strong
+	// inference; this level requires two independent supporting families.
+	if f.Certainty == CertaintyStronglyInferred {
+		positiveFamilies := 0
+		for _, adjustment := range f.Confidence.Adjustments {
+			if adjustment.Delta > 0 {
+				positiveFamilies++
+			}
+		}
+		if positiveFamilies < 2 {
+			return errors.New("strong inference requires two independent positive evidence families")
+		}
+	}
 	if f.FirstSeen == nil || f.LastSeen == nil || f.FirstSeen.IsZero() ||
 		f.LastSeen.IsZero() || f.LastSeen.Before(*f.FirstSeen) {
 		return errors.New("finding lacks a valid observed time range")
@@ -233,6 +250,10 @@ func (f DiagnosticFinding) Validate() error {
 		// type-specific validation for packet and metric evidence.
 		if ev.Kind != strings.TrimSpace(ev.Kind) {
 			return fmt.Errorf("evidence %q has a non-canonical kind %q", ev.ID, ev.Kind)
+		}
+		// Noncanonical IDs can double-count one metric under different names.
+		if ev.ID != strings.TrimSpace(ev.ID) {
+			return fmt.Errorf("non-canonical evidence ID %q", ev.ID)
 		}
 		if _, exists := evidenceByID[ev.ID]; exists {
 			return fmt.Errorf("duplicate evidence ID %q", ev.ID)
@@ -292,9 +313,32 @@ func (f DiagnosticFinding) Validate() error {
 		!hasNonemptyEntries(f.RecommendedValidation) {
 		return errors.New("finding lacks packet references or independent validation")
 	}
+	// Confidence-supporting packets must be present in the top-level
+	// navigable packet references from which the finding ID is derived.
+	packetRefs := make(map[packetIdentity][]PacketSourceReference, len(f.PacketReferences))
 	for _, p := range f.PacketReferences {
 		if err := validPacketSource(p); err != nil {
 			return err
+		}
+		key := packetIdentity{captureID: p.CaptureID, packetNumber: p.PacketNumber}
+		packetRefs[key] = append(packetRefs[key], p)
+	}
+	for _, evidence := range f.Evidence {
+		if evidence.Packet == nil {
+			continue
+		}
+		key := packetIdentity{captureID: evidence.Packet.CaptureID, packetNumber: evidence.Packet.PacketNumber}
+		matching := false
+		for _, reference := range packetRefs[key] {
+			if sameOptionalInt(reference.CaptureSectionIndex, evidence.Packet.CaptureSectionIndex) &&
+				sameOptionalInt(reference.CaptureInterfaceID, evidence.Packet.CaptureInterfaceID) &&
+				sameOptionalInstant(reference.Timestamp, evidence.Packet.Timestamp) {
+				matching = true
+				break
+			}
+		}
+		if !matching {
+			return fmt.Errorf("evidence %q cites a packet not present in finding packet references", evidence.ID)
 		}
 	}
 	if f.Certainty != CertaintyObserved && f.Certainty != CertaintyInformational {
@@ -312,6 +356,20 @@ func (f DiagnosticFinding) Validate() error {
 		return errors.New("finding ID does not match detector, category and packet identity")
 	}
 	return nil
+}
+
+func sameOptionalInt(a, b *int) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return *a == *b
+}
+
+func sameOptionalInstant(a, b *time.Time) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	return a.Equal(*b)
 }
 
 // StableFindingID is derived from machine-semantic context and packet
@@ -337,8 +395,8 @@ func StableFindingID(detectorID, detectorVersion, category string, refs []Packet
 	canonical := make([]string, 0, len(refs))
 	seenCanonical := make(map[string]struct{}, len(refs))
 	for _, p := range refs {
-		if p.CaptureID == "" || p.PacketNumber == 0 {
-			return "", errors.New("cannot identify an untraceable packet")
+		if strings.TrimSpace(p.CaptureID) == "" || p.CaptureID != strings.TrimSpace(p.CaptureID) || p.PacketNumber == 0 {
+			return "", errors.New("cannot identify a packet with non-canonical capture identity")
 		}
 		if (p.CaptureInterfaceID == nil) != (p.CaptureSectionIndex == nil) {
 			return "", errors.New("packet identity requires section and interface together")

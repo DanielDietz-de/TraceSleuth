@@ -377,8 +377,15 @@ func sameOptionalInstant(a, b *time.Time) bool {
 // It must only be called with source packet references established by the
 // capture reader; this helper does not invent evidence.
 func StableFindingID(detectorID, detectorVersion, category string, refs []PacketSourceReference) (string, error) {
-	if detectorID == "" || detectorVersion == "" || category == "" || len(refs) == 0 {
-		return "", errors.New("finding identity requires detector and packet references")
+	// Do not permit whitespace aliases for detector or category identity.
+	// Allowing both "lacp.state" and " lacp.state" would evade stable IDs.
+	for _, value := range []string{detectorID, detectorVersion, category} {
+		if value == "" || value != strings.TrimSpace(value) {
+			return "", errors.New("finding identity has a non-canonical detector/version/category")
+		}
+	}
+	if len(refs) == 0 {
+		return "", errors.New("finding identity requires packet references")
 	}
 	// Serialize only machine-semantic identifiers. Human-language reasons
 	// and localized presentation text must never change finding identity.
@@ -394,12 +401,34 @@ func StableFindingID(detectorID, detectorVersion, category string, refs []Packet
 	}
 	canonical := make([]string, 0, len(refs))
 	seenCanonical := make(map[string]struct{}, len(refs))
+	// A capture's packet number identifies one immutable source packet.
+	// Multiple reasons or protocol fields are permitted, but different
+	// timestamp/interface provenance for the same packet is contradictory.
+	type provenanceKey struct {
+		captureID    string
+		packetNumber uint64
+	}
+	seenProvenance := make(map[provenanceKey]PacketSourceReference, len(refs))
 	for _, p := range refs {
 		if strings.TrimSpace(p.CaptureID) == "" || p.CaptureID != strings.TrimSpace(p.CaptureID) || p.PacketNumber == 0 {
 			return "", errors.New("cannot identify a packet with non-canonical capture identity")
 		}
 		if (p.CaptureInterfaceID == nil) != (p.CaptureSectionIndex == nil) {
 			return "", errors.New("packet identity requires section and interface together")
+		}
+		if p.CaptureSectionIndex != nil && *p.CaptureSectionIndex < 0 ||
+			p.CaptureInterfaceID != nil && *p.CaptureInterfaceID < 0 {
+			return "", errors.New("packet identity contains negative section/interface")
+		}
+		pk := provenanceKey{captureID: p.CaptureID, packetNumber: p.PacketNumber}
+		if previous, seen := seenProvenance[pk]; seen {
+			if !sameOptionalInt(previous.CaptureSectionIndex, p.CaptureSectionIndex) ||
+				!sameOptionalInt(previous.CaptureInterfaceID, p.CaptureInterfaceID) ||
+				!sameOptionalInstant(previous.Timestamp, p.Timestamp) {
+				return "", fmt.Errorf("conflicting provenance for packet %d from capture %q", p.PacketNumber, p.CaptureID)
+			}
+		} else {
+			seenProvenance[pk] = p
 		}
 		// A timestamp represents an instant, not its display timezone.
 		// JSON would otherwise hash equal instants differently by offset.

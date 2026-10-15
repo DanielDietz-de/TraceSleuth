@@ -517,3 +517,57 @@ func TestStrongInferenceRequiresIndependentPositiveSignals(t *testing.T) {
 		t.Fatalf("strong inference with two independent supporting families was rejected: %v", err)
 	}
 }
+
+func TestStableFindingIDRejectsPaddedDetectorComponents(t *testing.T) {
+	packet := PacketSourceReference{CaptureID: "capture-a", PacketNumber: 17}
+	for _, tc := range []struct {
+		name, detectorID, version, category string
+	}{
+		{"padded detector ID", " lacp.state", "1", "l2"},
+		{"padded detector version", "lacp.state", "1 ", "l2"},
+		{"padded category", "lacp.state", "1", " l2"},
+		{"empty category", "lacp.state", "1", "  "},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := StableFindingID(tc.detectorID, tc.version, tc.category, []PacketSourceReference{packet}); err == nil {
+				t.Fatal("non-canonical detector identity accepted")
+			}
+		})
+	}
+}
+
+func TestStableFindingIDRejectsConflictingPacketProvenance(t *testing.T) {
+	utc := time.Date(2026, time.October, 15, 0, 0, 0, 0, time.UTC)
+	sameInstantDifferentZone := utc.In(time.FixedZone("UTC+01", 3600))
+	section0, section1, iface0, iface1 := 0, 1, 0, 1
+	base := PacketSourceReference{
+		CaptureID: "capture", PacketNumber: 12, Timestamp: &utc,
+		CaptureSectionIndex: &section0, CaptureInterfaceID: &iface0, Reason: "initial",
+	}
+	// Additional relevant fields and human reasons are not contradictory.
+	samePacket := base
+	samePacket.Reason = "additional context"
+	samePacket.RelevantFields = map[string]string{"tcp.flags": "ACK"}
+	samePacket.Timestamp = &sameInstantDifferentZone
+	if _, err := StableFindingID("tcp.flags", "1", "transport", []PacketSourceReference{base, samePacket}); err != nil {
+		t.Fatalf("compatible packet aliases rejected: %v", err)
+	}
+	for _, tc := range []struct {
+		name string
+		edit func(*PacketSourceReference)
+	}{
+		{"different interface", func(p *PacketSourceReference) { p.CaptureInterfaceID = &iface1 }},
+		{"different section", func(p *PacketSourceReference) { p.CaptureSectionIndex = &section1 }},
+		{"different timestamp", func(p *PacketSourceReference) { v := utc.Add(time.Second); p.Timestamp = &v }},
+		{"unknown interface", func(p *PacketSourceReference) { p.CaptureInterfaceID, p.CaptureSectionIndex = nil, nil }},
+		{"unknown timestamp", func(p *PacketSourceReference) { p.Timestamp = nil }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			changed := base
+			tc.edit(&changed)
+			if _, err := StableFindingID("tcp.flags", "1", "transport", []PacketSourceReference{base, changed}); err == nil {
+				t.Fatal("conflicting packet provenance was accepted")
+			}
+		})
+	}
+}

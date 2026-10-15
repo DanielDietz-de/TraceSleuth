@@ -268,7 +268,7 @@ SUPPORTED PROTOCOLS:
   LAN:       VRRP, CDP, LLDP, HSRP, STP (with flapping detection)
 
 For more information and documentation:
-  https://github.com/gocisse/tracesleuth
+  https://github.com/DanielDietz-de/TraceSleuth
 
 `, version)
 	}

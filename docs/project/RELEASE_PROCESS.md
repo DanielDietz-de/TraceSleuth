@@ -149,15 +149,138 @@ A blank field is not equivalent to success.
 
 ## Tagging
 
-After merge and green required CI:
+**Never publish by pushing a version tag.** A tag push checks out the tagged
+commit, which can contain an obsolete or unreviewed release workflow.
+The validated workflow runs only from the current trusted `main` commit.
+Its gated release job creates or validates the version tag itself, after all
+release checks. A maintainer-signed tag may be prepared only for that exact
+approved commit and is **not** a release trigger.
 
-```bash
-VERSION="$(tr -d '\r\n' < VERSION)"
-git tag -s "v${VERSION}" -m "TraceSleuth v${VERSION}"
-git push origin "v${VERSION}"
-```
+Historical commits in this repository contained a tag-triggered release
+workflow at `.github/workflows/release.yml`. Merely removing the trigger
+from current `main` does **not** retroactively rewrite those commits.
+Therefore the historical path is retained as a deliberately failing stub;
+the actual hardened release pipeline was moved to
+`.github/workflows/validated-release.yml` with its **independent workflow ID**.
+Before any publication, the new release workflow checks the historical
+workflow's actual GitHub Actions state and refuses to run unless it is
+`disabled_manually`. This makes the old workflow's deactivation an explicit,
+automatically attested prerequisite, not a trusting written assertion.
+No tag release may occur before this disable-state check succeeds.
+Never invent or embed maintainer credentials in automation.
 
-Signed tags are preferred where maintainer signing infrastructure is available. Never invent or embed maintainer credentials in automation.
+**One-time administrator action after the reviewed PR merges:** open GitHub
+**Actions → Legacy Release — disable this workflow → … → Disable workflow**,
+then verify that the original `.github/workflows/release.yml` workflow
+reports `state=disabled_manually`. Do not disable the separately named
+`validated-release.yml`. GitHub offers the equivalent authenticated
+REST operation `PUT /repos/{owner}/{repo}/actions/workflows/release.yml/disable`
+with Actions-write permission. The connected GitHub adapter currently
+does not expose this mutation, so it must be performed via approved GitHub
+administration access. Until confirmed, automated publishing is blocked.
+
+## Controlled automated prerelease publication
+
+The **Validated Release** workflow (`.github/workflows/validated-release.yml`)
+accepts **only** two trusted-default-branch events:
+
+- a GitHub Actions manual dispatch on current `main` supplying the exact
+  `VERSION`; dispatch targeting a tag or other branch is rejected;
+- a reviewed merge pushed to `main` whose commit subject begins
+  `release: vX.Y.Z`, with X.Y.Z exactly matching `VERSION`.
+
+Tag-push release events are deliberately **not** accepted. No workflow loaded
+from a tagged or historical commit is trusted as a release authority.
+
+The per-PR `scripts/test-release-context.sh` matrix validates authorized and
+rejected event, ref and version combinations against the **same shell helper**
+used by the release workflow; the workflow job condition independently enforces
+the event/ref restriction. In particular, a tag selected in the manual Actions
+UI is not equivalent to a pushed tag.
+
+Before doing any release work, the job proves that the legacy
+`.github/workflows/release.yml` is manually disabled at the workflow-ID
+level. The release job then dispatches **fresh, attempt-specific CI and
+Security** runs
+using `workflow_dispatch` on the exact current `main` commit. Their unique
+release-run/attempt ID must match the returned workflow runs, and **both must
+complete successfully on the exact release commit SHA**. Stale push runs
+cannot satisfy the release gate; later scheduled, pushed or manually requested
+failed/incomplete CI or Security checks invalidate earlier green results.
+The gate is rechecked before tag creation and immediately before publication,
+including older workflow IDs whose later re-run attempt updates occur after
+the release attempt started;
+a moved `main` fails closed. This requires `actions:write` scoped to the
+release workflow's `GITHUB_TOKEN` and supported Actions dispatch permissions.
+The 120-minute wait remains bounded; missing, cancelled or timed-out runs are
+not treated as success.
+
+It then repeats frontend build/full lint/tests, Go vet/tests/race tests,
+builds the four supported binaries, exercises CLI JSON regression checks,
+verifies all archive SHA-256 checksums, and only then creates the release.
+For pre-1.0 versions the release is explicitly marked as a **prerelease** and
+its notes include the remaining limitations. Existing releases cannot be
+silently replaced.
+
+Signed maintainer tags are preferred. When publication is initiated on
+`main` without a signed tag, GitHub's release API creates a lightweight
+version tag at the exact validated release SHA, using the scoped
+GitHub Actions token. The release job atomically creates the tag if absent
+and validates that its resolved commit equals the exact green release SHA.
+For signed annotated tags, it resolves the tag object to the underlying
+commit; any mismatch fails before publication. A repeated run may reuse an
+existing tag only when it identifies that same green commit. This is an
+explicitly documented pre-1.0 alternative, not a claim that the tag is
+GPG-signed.
+
+## Protected version-tag prerequisite
+
+The prerelease workflow **fails closed** unless GitHub reports an active tag
+ruleset covering the exact `refs/tags/vX.Y.Z` with both **Restrict updates**
+and **Restrict deletions**, and an **explicitly present, empty** `bypass_actors`
+array. A redacted or absent bypass field is not evidence of safety.
+The release token must have sufficient ruleset-visibility permission to
+obtain authoritative details; if GitHub withholds the field, publication is
+blocked until an auditable privileged validation is designed and tested.
+Patterns are deliberately restricted to exact or single-component
+`refs/tags/*` forms and `~ALL`, not ambiguous recursive globs. This protection
+must apply **before** the tag is created: GitHub immutable releases lock the tag
+only *after* release publication and do not cover the validation-to-publication
+interval. The workflow independently revalidates the ruleset and the exact
+annotated/lightweight tag target immediately before publishing.
+
+A repository administrator must configure this once in **Settings → Rules →
+Rulesets → New tag ruleset**:
+
+1. Include 'refs/tags/v*' in the target tag pattern.
+2. Activate **Restrict updates** and **Restrict deletions**.
+3. **Do not restrict creations**: the scoped release workflow must be able to
+   create a new tag only after exact-SHA CI, Security and release validation.
+4. Configure **no bypass actors** for the version-tag ruleset. A
+   GitHub-token response without `bypass_actors: []` is now **rejected**;
+   maintainer assurances alone never cause automated validation to pass.
+   Grant only an appropriately scoped ruleset-read validation capability,
+   or leave automatic publishing intentionally disabled.
+5. Also enable **release immutability** under repository Settings → Releases to
+   lock assets and tags following publication; tag rulesets protect the
+   interval *before* release immutability takes effect.
+
+The workflow runs `scripts/check-release-tag-protection.py` and its negative
+fixture tests are part of normal CI. No qualifying and completely visible
+tag ruleset means **no automated release**, even when other CI checks are
+green. The documented historical tag-trigger risk is separately verified using
+`scripts/check-legacy-release-disabled.py`: an active, missing or
+unverifiably disabled legacy workflow fails closed; the safe new workflow
+alone does not make unsafe old tag flows disappear.
+This is an explicit supply-chain authorization gate, not a reason to skip
+review or publish by hand.
+
+The fresh, release-specific gate tolerates **up to 120 minutes** of
+CI/Security runtime (with a further 60-minute budget for build/package/
+validation), while rejecting failed, cancelled, pending, or missing runs.
+A later failed Security rerun or weekly scan on the same commit supersedes
+a formerly green run. Tags remain bound to the validated commit, including
+annotated tags; never force-move version tags as a workaround.
 
 ## Rollback and withdrawn releases
 

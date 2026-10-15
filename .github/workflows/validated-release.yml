@@ -1,0 +1,275 @@
+name: Validated Release
+
+# Release only from the trusted default branch. Never load a release workflow
+# from an arbitrary tag or historical unreviewed commit.
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      publish_version:
+        description: 'Exact VERSION to publish (e.g. 0.2.0)'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: write
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  NODE_VERSION: '24'
+  BINARY_NAME: tracesleuth
+
+concurrency:
+  group: release-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and release TraceSleuth
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+       startsWith(github.event.head_commit.message, 'release: v'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Refuse publication from an active historical tag-release workflow
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/check-legacy-release-disabled.py
+
+      - name: Read and validate version
+        id: version
+        shell: bash
+        env:
+          RELEASE_MESSAGE: ${{ github.event.head_commit.message }}
+          RELEASE_INPUT_VERSION: ${{ inputs.publish_version }}
+        run: bash scripts/release-context.sh
+
+      - name: Dispatch and verify fresh release-specific CI and Security
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/require-release-gates.py dispatch
+
+      - name: Require protected version-tag ruleset
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/check-release-tag-protection.py '${{ steps.version.outputs.tag }}'
+
+      - name: Prevent duplicate version publication
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag='${{ steps.version.outputs.tag }}'
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo 'Release already exists for this version; refusing overwrite.' >&2
+            exit 1
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: web/frontend/package-lock.json
+
+      - name: Build and test frontend
+        working-directory: web/frontend
+        run: |
+          npm ci
+          npm run build
+          npm run lint
+          npm run test
+
+      - name: Stage embedded frontend and GeoIP database
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf cmd/sdwan-triage/dist
+          mkdir -p cmd/sdwan-triage/dist cmd/sdwan-triage/data
+          cp -R web/frontend/dist/. cmd/sdwan-triage/dist/
+          test -s data/GeoLite2-City.mmdb
+          cp data/GeoLite2-City.mmdb cmd/sdwan-triage/data/GeoLite2-City.mmdb
+          test -s cmd/sdwan-triage/data/GeoLite2-City.mmdb
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+
+      - name: Verify Go quality
+        run: |
+          go vet ./...
+          go test ./... -timeout 120s
+          go test -race ./... -timeout 240s
+
+      - name: Define build metadata
+        id: ldflags
+        shell: bash
+        run: |
+          flags="-s -w"
+          flags="$flags -X main.version=${{ steps.version.outputs.version }}"
+          flags="$flags -X main.buildCommit=${{ steps.version.outputs.commit }}"
+          flags="$flags -X main.buildDate=${{ steps.version.outputs.date }}"
+          echo "flags=$flags" >> "$GITHUB_OUTPUT"
+
+      - name: Build Linux amd64
+        env:
+          CGO_ENABLED: 0
+          GOOS: linux
+          GOARCH: amd64
+        run: |
+          mkdir -p build
+          go build -trimpath -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-linux-amd64 ./cmd/sdwan-triage
+          tar -czf build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-linux-amd64.tar.gz -C build ${{ env.BINARY_NAME }}-linux-amd64
+
+      - name: Verify Linux CLI machine-readable output
+        run: bash scripts/test-cli-json.sh build/${{ env.BINARY_NAME }}-linux-amd64
+
+      - name: Build macOS amd64
+        env:
+          CGO_ENABLED: 0
+          GOOS: darwin
+          GOARCH: amd64
+        run: |
+          go build -trimpath -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-darwin-amd64 ./cmd/sdwan-triage
+          tar -czf build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-darwin-amd64.tar.gz -C build ${{ env.BINARY_NAME }}-darwin-amd64
+
+      - name: Build macOS arm64
+        env:
+          CGO_ENABLED: 0
+          GOOS: darwin
+          GOARCH: arm64
+        run: |
+          go build -trimpath -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-darwin-arm64 ./cmd/sdwan-triage
+          tar -czf build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-darwin-arm64.tar.gz -C build ${{ env.BINARY_NAME }}-darwin-arm64
+
+      - name: Build Windows amd64
+        env:
+          CGO_ENABLED: 0
+          GOOS: windows
+          GOARCH: amd64
+        run: |
+          go build -trimpath -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-windows-amd64.exe ./cmd/sdwan-triage
+          cd build
+          # zip is not available on every authorized build host. Python's
+          # standard library yields the same portable ZIP without extra apt.
+          python3 - <<'PYCODE'
+          from zipfile import ZipFile, ZIP_DEFLATED
+          binary = 'tracesleuth-windows-amd64.exe'
+          archive = 'tracesleuth-${{ steps.version.outputs.tag }}-windows-amd64.zip'
+          with ZipFile(archive, 'w', compression=ZIP_DEFLATED, compresslevel=6) as z:
+              z.write(binary)
+          PYCODE
+
+      - name: Generate SHA-256 checksums
+        working-directory: build
+        run: |
+          sha256sum *.tar.gz *.zip > checksums-${{ steps.version.outputs.tag }}.txt
+          cat checksums-${{ steps.version.outputs.tag }}.txt
+
+      - name: Verify archive checksums and prepare prerelease notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          (cd build && sha256sum -c 'checksums-${{ steps.version.outputs.tag }}.txt')
+          python3 - <<'PYCODE'
+          from pathlib import Path
+          version = Path('VERSION').read_text().strip()
+          lines = Path('CHANGELOG.md').read_text().splitlines()
+          start = next(i for i, line in enumerate(lines) if line.startswith('## [' + version + ']'))
+          end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith('## [')), len(lines))
+          notes = '\n'.join(lines[start:end]).strip()
+          major = int(version.split('.')[0])
+          if not notes:
+              raise SystemExit('Cannot publish a release with no changelog')
+          if major == 0:
+              if not any(section in notes for section in ('### Remaining limitations', '### Compatibility')):
+                  raise SystemExit('Pre-1.0 prerelease notes must disclose limitations or compatibility restrictions')
+              notes = '**Pre-1.0 prerelease: not production-ready.**\n\n' + notes
+          Path('build/release-notes.md').write_text(notes + '\n')
+          PYCODE
+
+      - name: Pin release tag to the exact validated commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/require-release-gates.py verify
+          tag='${{ steps.version.outputs.tag }}'
+          ref_route="repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}"
+          if ! ref_json="$(gh api "$ref_route" 2>/dev/null)"; then
+            # Atomic create: GitHub refuses to replace an existing tag.
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f "ref=refs/tags/$tag" -f "sha=$GITHUB_SHA" >/dev/null
+            ref_json="$(gh api "$ref_route")"
+          fi
+          ref_type="$(jq -r '.object.type' <<<"$ref_json")"
+          ref_sha="$(jq -r '.object.sha' <<<"$ref_json")"
+          if [[ "$ref_type" == tag ]]; then
+            # Respect and validate maintainer-signed annotated tags.
+            tag_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/$ref_sha")"
+            ref_type="$(jq -r '.object.type' <<<"$tag_json")"
+            ref_sha="$(jq -r '.object.sha' <<<"$tag_json")"
+          fi
+          if [[ "$ref_type" != commit || "$ref_sha" != "$GITHUB_SHA" ]]; then
+            printf 'Tag %s points to %s (%s), expected commit %s\n' \
+              "$tag" "$ref_sha" "$ref_type" "$GITHUB_SHA" >&2
+            exit 1
+          fi
+          echo "Tag $tag is pinned to validated commit $GITHUB_SHA"
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Recheck exact-SHA CI/Security and tag policy before publication.
+          python3 scripts/require-release-gates.py verify
+          python3 scripts/check-release-tag-protection.py '${{ steps.version.outputs.tag }}'
+          tag='${{ steps.version.outputs.tag }}'
+          ref_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}")"
+          ref_type="$(jq -r ".object.type" <<<"$ref_json")"
+          ref_sha="$(jq -r ".object.sha" <<<"$ref_json")"
+          if [[ "$ref_type" == tag ]]; then
+            tag_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/$ref_sha")"
+            ref_type="$(jq -r ".object.type" <<<"$tag_json")"
+            ref_sha="$(jq -r ".object.sha" <<<"$tag_json")"
+          fi
+          if [[ "$ref_type" != commit || "$ref_sha" != "$GITHUB_SHA" ]]; then
+            echo "Refusing publication: protected tag does not point to validated SHA." >&2
+            exit 1
+          fi
+          prerelease_args=()
+          if [[ '${{ steps.version.outputs.version }}' == 0.* ]]; then
+            prerelease_args+=(--prerelease)
+          fi
+
+          gh release create '${{ steps.version.outputs.tag }}' \
+            build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-linux-amd64.tar.gz \
+            build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-darwin-amd64.tar.gz \
+            build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-darwin-arm64.tar.gz \
+            build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-windows-amd64.zip \
+            build/checksums-${{ steps.version.outputs.tag }}.txt \
+            --title 'TraceSleuth ${{ steps.version.outputs.tag }}' \
+            --notes-file build/release-notes.md \
+            --target "$GITHUB_SHA" \
+            --verify-tag \
+            "${prerelease_args[@]}"

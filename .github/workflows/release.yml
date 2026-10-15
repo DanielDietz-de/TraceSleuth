@@ -1,166 +1,21 @@
-name: Release
+name: Legacy Release — disable this workflow
 
+# Historical commits used this path for unsafe tag-triggered publishing.
+# A current-branch stub does not protect historical tag commits. Administrators
+# MUST disable this workflow in GitHub Actions (state=disabled_manually).
+# Actual guarded releases use independently named validated-release.yml.
 on:
-  push:
-    tags:
-      - 'v*.*.*'
   workflow_dispatch:
 
 permissions:
-  contents: write
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-  NODE_VERSION: '24'
-  BINARY_NAME: tracesleuth
+  contents: read
 
 jobs:
-  release:
-    name: Build and release TraceSleuth
+  retired:
+    name: Historical publishing has been retired
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Read and validate version
-        id: version
-        shell: bash
+      - name: Refuse legacy release
         run: |
-          set -euo pipefail
-          version="$(tr -d '\r\n' < VERSION)"
-          tag="${GITHUB_REF#refs/tags/}"
-
-          if [[ "$tag" == "$GITHUB_REF" ]]; then
-            echo 'Release workflow must run from a tag.' >&2
-            exit 1
-          fi
-
-          if [[ "$tag" != "v${version}" ]]; then
-            printf 'Tag/version mismatch: tag=%s VERSION=%s\n' "$tag" "$version" >&2
-            exit 1
-          fi
-
-          bash scripts/check-version-contract.sh
-
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-          echo "date=$(date -u '+%Y-%m-%dT%H:%M:%SZ')" >> "$GITHUB_OUTPUT"
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-          cache-dependency-path: web/frontend/package-lock.json
-
-      - name: Build and test frontend
-        working-directory: web/frontend
-        run: |
-          npm ci
-          npm run build
-          npm run lint
-          npm run test
-
-      - name: Stage embedded frontend and GeoIP database
-        shell: bash
-        run: |
-          set -euo pipefail
-          rm -rf cmd/sdwan-triage/dist
-          mkdir -p cmd/sdwan-triage/dist cmd/sdwan-triage/data
-          cp -R web/frontend/dist/. cmd/sdwan-triage/dist/
-          test -s data/GeoLite2-City.mmdb
-          cp data/GeoLite2-City.mmdb cmd/sdwan-triage/data/GeoLite2-City.mmdb
-          test -s cmd/sdwan-triage/data/GeoLite2-City.mmdb
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-
-      - name: Verify Go quality
-        run: |
-          go vet ./...
-          go test ./... -timeout 120s
-          go test -race ./... -timeout 240s
-
-      - name: Define build metadata
-        id: ldflags
-        shell: bash
-        run: |
-          flags="-s -w"
-          flags="$flags -X main.version=${{ steps.version.outputs.version }}"
-          flags="$flags -X main.buildCommit=${{ steps.version.outputs.commit }}"
-          flags="$flags -X main.buildDate=${{ steps.version.outputs.date }}"
-          echo "flags=$flags" >> "$GITHUB_OUTPUT"
-
-      - name: Build Linux amd64
-        env:
-          CGO_ENABLED: 0
-          GOOS: linux
-          GOARCH: amd64
-        run: |
-          mkdir -p build
-          go build -trimpath -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-linux-amd64 ./cmd/sdwan-triage
-          tar -czf build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-linux-amd64.tar.gz -C build ${{ env.BINARY_NAME }}-linux-amd64
-
-      - name: Verify Linux CLI machine-readable output
-        run: bash scripts/test-cli-json.sh build/${{ env.BINARY_NAME }}-linux-amd64
-
-      - name: Build macOS amd64
-        env:
-          CGO_ENABLED: 0
-          GOOS: darwin
-          GOARCH: amd64
-        run: |
-          go build -trimpath -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-darwin-amd64 ./cmd/sdwan-triage
-          tar -czf build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-darwin-amd64.tar.gz -C build ${{ env.BINARY_NAME }}-darwin-amd64
-
-      - name: Build macOS arm64
-        env:
-          CGO_ENABLED: 0
-          GOOS: darwin
-          GOARCH: arm64
-        run: |
-          go build -trimpath -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-darwin-arm64 ./cmd/sdwan-triage
-          tar -czf build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-darwin-arm64.tar.gz -C build ${{ env.BINARY_NAME }}-darwin-arm64
-
-      - name: Build Windows amd64
-        env:
-          CGO_ENABLED: 0
-          GOOS: windows
-          GOARCH: amd64
-        run: |
-          go build -trimpath -ldflags '${{ steps.ldflags.outputs.flags }}' -o build/${{ env.BINARY_NAME }}-windows-amd64.exe ./cmd/sdwan-triage
-          cd build
-          zip ${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-windows-amd64.zip ${{ env.BINARY_NAME }}-windows-amd64.exe
-
-      - name: Generate SHA-256 checksums
-        working-directory: build
-        run: |
-          sha256sum *.tar.gz *.zip > checksums-${{ steps.version.outputs.tag }}.txt
-          cat checksums-${{ steps.version.outputs.tag }}.txt
-
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          prerelease_args=()
-          if [[ '${{ steps.version.outputs.version }}' == 0.* ]]; then
-            prerelease_args+=(--prerelease)
-          fi
-
-          gh release create '${{ steps.version.outputs.tag }}' \
-            build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-linux-amd64.tar.gz \
-            build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-darwin-amd64.tar.gz \
-            build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-darwin-arm64.tar.gz \
-            build/${{ env.BINARY_NAME }}-${{ steps.version.outputs.tag }}-windows-amd64.zip \
-            build/checksums-${{ steps.version.outputs.tag }}.txt \
-            --title 'TraceSleuth ${{ steps.version.outputs.tag }}' \
-            --generate-notes \
-            "${prerelease_args[@]}"
+          echo "::error::This historical workflow must be disabled in GitHub Actions. Use validated-release.yml only after release policy gates are satisfied."
+          exit 1

@@ -3,6 +3,7 @@ package analyzer
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -112,5 +113,51 @@ func TestPCAPNGFramingAcceptsCompleteSimplePacket(t *testing.T) {
 	}
 	if _, err := InspectCapture(path); err != nil {
 		t.Fatalf("valid SPB rejected by higher-level preflight: %v", err)
+	}
+}
+
+func TestPCAPNGFramingRejectsTimestampResolutionOverflow(t *testing.T) {
+	path, valid := makeQualityFixture(t, true, []gopacket.CaptureInfo{{
+		Timestamp: time.Unix(1_000, 0), CaptureLength: 60, Length: 60,
+	}})
+	for _, value := range []byte{0x14, 0x40, 0xc0, 0xff} {
+		t.Run(fmt.Sprintf("resolution-0x%02x", value), func(t *testing.T) {
+			// New IDB: 8-byte fixed header, if_tsresol option (code 9),
+			// 1-byte value with 3 bytes of required padding.
+			idb := make([]byte, 16)
+			binary.LittleEndian.PutUint16(idb[:2], 1)
+			binary.LittleEndian.PutUint32(idb[4:8], 65535)
+			binary.LittleEndian.PutUint16(idb[8:10], 9)
+			binary.LittleEndian.PutUint16(idb[10:12], 1)
+			idb[12] = value
+			if err := os.WriteFile(path, append(append([]byte(nil), valid...), framedPCAPNGBlock(1, idb)...), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := InspectCapture(path); err == nil {
+				t.Fatalf("overflowing timestamp precision 0x%02x was accepted", value)
+			}
+		})
+	}
+}
+
+func TestPCAPNGFramingRejectsEPBExceedingInterfaceSnaplen(t *testing.T) {
+	path, valid := makeQualityFixture(t, true, []gopacket.CaptureInfo{{
+		Timestamp: time.Unix(1_000, 0), CaptureLength: 60, Length: 60,
+	}})
+	newIface := make([]byte, 8)
+	binary.LittleEndian.PutUint16(newIface[0:2], 1)
+	binary.LittleEndian.PutUint32(newIface[4:8], 64)
+	// New interface has index 1 (default interface 0 is already present).
+	packet := make([]byte, 20+100)
+	binary.LittleEndian.PutUint32(packet[0:4], 1)
+	binary.LittleEndian.PutUint32(packet[12:16], 100)
+	binary.LittleEndian.PutUint32(packet[16:20], 100)
+	data := append(append([]byte(nil), valid...), framedPCAPNGBlock(1, newIface)...)
+	data = append(data, framedPCAPNGBlock(6, packet)...)
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := InspectCapture(path); err == nil {
+		t.Fatal("EPB captured length exceeded its own interface snaplen")
 	}
 }

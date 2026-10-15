@@ -149,26 +149,34 @@ A blank field is not equivalent to success.
 
 ## Tagging
 
-After merge and green required CI:
+**Never publish by pushing a version tag.** A tag push checks out the tagged
+commit, which can contain an obsolete or unreviewed release workflow.
+The validated workflow runs only from the current trusted `main` commit.
+Its gated release job creates or validates the version tag itself, after all
+release checks. A maintainer-signed tag may be prepared only for that exact
+approved commit and is **not** a release trigger.
 
-```bash
-VERSION="$(tr -d '\r\n' < VERSION)"
-git tag -s "v${VERSION}" -m "TraceSleuth v${VERSION}"
-git push origin "v${VERSION}"
-```
-
-Signed tags are preferred where maintainer signing infrastructure is available. Never invent or embed maintainer credentials in automation.
+Historical commits in this repository contained a tag-triggered release
+workflow. Merely removing the trigger from current `main` does **not**
+retroactively rewrite those commits. Before accepting version tags from
+outside the guarded release job, administrators must independently verify
+that historical tag-push workflows cannot publish, e.g. by disabling that
+legacy workflow at repository level or enforcing an approved tag-creation
+policy. This residual historical trigger is a documented release blocker;
+do not claim it is solved solely by the revised YAML. Never invent or embed
+maintainer credentials in automation.
 
 ## Controlled automated prerelease publication
 
-In addition to a maintainer-created version tag, the Release workflow supports
-a guarded publish from the default branch. It accepts exactly one of:
+The Release workflow accepts **only** two trusted-default-branch events:
 
-- a push of a matching `vX.Y.Z` tag;
-- a GitHub Actions manual dispatch on `main` supplying the exact `VERSION`;
-  manual dispatch targeting a tag or another branch is explicitly denied;
-- a reviewed merge to `main` whose commit subject begins
+- a GitHub Actions manual dispatch on current `main` supplying the exact
+  `VERSION`; dispatch targeting a tag or other branch is rejected;
+- a reviewed merge pushed to `main` whose commit subject begins
   `release: vX.Y.Z`, with X.Y.Z exactly matching `VERSION`.
+
+Tag-push release events are deliberately **not** accepted. No workflow loaded
+from a tagged or historical commit is trusted as a release authority.
 
 The per-PR `scripts/test-release-context.sh` matrix validates authorized and
 rejected event, ref and version combinations against the **same shell helper**
@@ -176,8 +184,18 @@ used by the release workflow; the workflow job condition independently enforces
 the event/ref restriction. In particular, a tag selected in the manual Actions
 UI is not equivalent to a pushed tag.
 
-The release job does not publish until **both CI and Security have succeeded on
-the exact release commit SHA** (not the pull-request head or another branch).
+The release job dispatches **fresh, attempt-specific CI and Security** runs
+using `workflow_dispatch` on the exact current `main` commit. Their unique
+release-run/attempt ID must match the returned workflow runs, and **both must
+complete successfully on the exact release commit SHA**. Stale push runs
+cannot satisfy the release gate; later scheduled, pushed or manually requested
+failed/incomplete CI or Security checks invalidate earlier green results.
+The gate is rechecked before tag creation and immediately before publication;
+a moved `main` fails closed. This requires `actions:write` scoped to the
+release workflow's `GITHUB_TOKEN` and supported Actions dispatch permissions.
+The 120-minute wait remains bounded; missing, cancelled or timed-out runs are
+not treated as success.
+
 It then repeats frontend build/full lint/tests, Go vet/tests/race tests,
 builds the four supported binaries, exercises CLI JSON regression checks,
 verifies all archive SHA-256 checksums, and only then creates the release.
@@ -199,8 +217,14 @@ GPG-signed.
 ## Protected version-tag prerequisite
 
 The prerelease workflow **fails closed** unless GitHub reports an active tag
-ruleset covering the exact 'refs/tags/vX.Y.Z' with both **Restrict updates**
-and **Restrict deletions**, and without exposed bypass actors. This protection
+ruleset covering the exact `refs/tags/vX.Y.Z` with both **Restrict updates**
+and **Restrict deletions**, and an **explicitly present, empty** `bypass_actors`
+array. A redacted or absent bypass field is not evidence of safety.
+The release token must have sufficient ruleset-visibility permission to
+obtain authoritative details; if GitHub withholds the field, publication is
+blocked until an auditable privileged validation is designed and tested.
+Patterns are deliberately restricted to exact or single-component
+`refs/tags/*` forms and `~ALL`, not ambiguous recursive globs. This protection
 must apply **before** the tag is created: GitHub immutable releases lock the tag
 only *after* release publication and do not cover the validation-to-publication
 interval. The workflow independently revalidates the ruleset and the exact
@@ -213,23 +237,29 @@ Rulesets → New tag ruleset**:
 2. Activate **Restrict updates** and **Restrict deletions**.
 3. **Do not restrict creations**: the scoped release workflow must be able to
    create a new tag only after exact-SHA CI, Security and release validation.
-4. Configure **no bypass actors** for the version-tag ruleset. GitHub's
-   GITHUB_TOKEN may not expose a ruleset's bypass actor list; repository
-   administrators are responsible for confirming it contains no exceptions.
+4. Configure **no bypass actors** for the version-tag ruleset. A
+   GitHub-token response without `bypass_actors: []` is now **rejected**;
+   maintainer assurances alone never cause automated validation to pass.
+   Grant only an appropriately scoped ruleset-read validation capability,
+   or leave automatic publishing intentionally disabled.
 5. Also enable **release immutability** under repository Settings → Releases to
    lock assets and tags following publication; tag rulesets protect the
    interval *before* release immutability takes effect.
 
-The workflow runs 'scripts/check-release-tag-protection.py' and its negative
-fixture tests are part of normal CI. No version tag ruleset means **no
-automated release**, even when other CI checks are green. This is an explicit
-supply-chain authorization gate, not a reason to skip review or publish by hand.
+The workflow runs `scripts/check-release-tag-protection.py` and its negative
+fixture tests are part of normal CI. No qualifying and completely visible
+tag ruleset means **no automated release**, even when other CI checks are
+green. The documented historical tag-trigger risk must also be addressed;
+a safe new workflow alone does not make unsafe old tag flows disappear.
+This is an explicit supply-chain authorization gate, not a reason to skip
+review or publish by hand.
 
-The exact-commit workflow gate tolerates **up to 120 minutes** of CI/Security
-runtime (with a further 60-minute budget for build/package/validation), while
-still rejecting failed, cancelled, or missing runs. Tags remain bound to the
-actual published commit, including annotated tags; never force-move version
-tags as a workaround.
+The fresh, release-specific gate tolerates **up to 120 minutes** of
+CI/Security runtime (with a further 60-minute budget for build/package/
+validation), while rejecting failed, cancelled, pending, or missing runs.
+A later failed Security rerun or weekly scan on the same commit supersedes
+a formerly green run. Tags remain bound to the validated commit, including
+annotated tags; never force-move version tags as a workaround.
 
 ## Rollback and withdrawn releases
 

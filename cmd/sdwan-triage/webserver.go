@@ -16,15 +16,15 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/DanielDietz-de/TraceSleuth/pkg/database"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/integration"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/intelligence"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/metrics"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/middleware"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/web/handlers"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/web/storage"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
-	"github.com/gocisse/sdwan-triage/pkg/database"
-	"github.com/gocisse/sdwan-triage/pkg/integration"
-	"github.com/gocisse/sdwan-triage/pkg/intelligence"
-	"github.com/gocisse/sdwan-triage/pkg/metrics"
-	"github.com/gocisse/sdwan-triage/pkg/middleware"
-	"github.com/gocisse/sdwan-triage/pkg/web/handlers"
-	"github.com/gocisse/sdwan-triage/pkg/web/storage"
 )
 
 const (

@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DanielDietz-de/TraceSleuth/pkg/database"
 	"github.com/gin-gonic/gin"
-	"github.com/gocisse/sdwan-triage/pkg/database"
 	"github.com/golang-jwt/jwt/v5"
 )
 

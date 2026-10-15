@@ -5,8 +5,8 @@ import (
 	"os"
 	"strings"
 
-	"github.com/gocisse/sdwan-triage/pkg/detector"
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/detector"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 )
 
 // PrintHandshakeAnalysis prints TCP handshake analysis to console

@@ -3,7 +3,7 @@ package detector
 import (
 	"testing"
 
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 )
 
 func TestDetectBGPHijack_ShortASPath(t *testing.T) {

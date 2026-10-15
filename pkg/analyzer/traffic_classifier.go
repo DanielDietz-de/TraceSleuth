@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 )
 
 // TrafficClassification contains smart classification of a stream

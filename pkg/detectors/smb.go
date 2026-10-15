@@ -3,7 +3,7 @@ package detectors
 import (
 	"encoding/binary"
 
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )

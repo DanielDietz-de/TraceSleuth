@@ -11,8 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/DanielDietz-de/TraceSleuth/pkg/analyzer"
 	"github.com/gin-gonic/gin"
-	"github.com/gocisse/sdwan-triage/pkg/analyzer"
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"

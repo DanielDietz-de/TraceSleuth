@@ -10,11 +10,11 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/gocisse/sdwan-triage/pkg/analyzer"
-	"github.com/gocisse/sdwan-triage/pkg/integration"
-	"github.com/gocisse/sdwan-triage/pkg/models"
-	"github.com/gocisse/sdwan-triage/pkg/output"
-	"github.com/gocisse/sdwan-triage/pkg/web/storage"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/analyzer"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/integration"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/output"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/web/storage"
 	"github.com/google/uuid"
 )
 

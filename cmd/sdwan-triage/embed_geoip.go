@@ -3,7 +3,7 @@ package main
 import (
 	"embed"
 
-	"github.com/gocisse/sdwan-triage/pkg/detector"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/detector"
 )
 
 // Embed the GeoLite2-City.mmdb database so the binary is fully self-contained.

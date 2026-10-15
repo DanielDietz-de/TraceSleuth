@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/gocisse/sdwan-triage/pkg/config"
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/config"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 	"github.com/jung-kurt/gofpdf"
 )
 

@@ -3,7 +3,7 @@ package output
 import (
 	"testing"
 
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 )
 
 func TestSplitReportData(t *testing.T) {

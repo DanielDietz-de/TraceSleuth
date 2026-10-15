@@ -5,8 +5,8 @@ import (
 	"html/template"
 	"strings"
 
-	"github.com/gocisse/sdwan-triage/pkg/models"
-	"github.com/gocisse/sdwan-triage/pkg/safety"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/safety"
 )
 
 // JuniorModeConfig configures junior engineer mode output

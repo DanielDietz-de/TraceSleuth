@@ -1,7 +1,7 @@
 package analyzer
 
 import (
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 )
 
 // DetectedIssue represents a specific problem identified in a stream

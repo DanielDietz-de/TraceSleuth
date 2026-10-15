@@ -3,9 +3,9 @@ package main
 import (
 	"net/http"
 
+	"github.com/DanielDietz-de/TraceSleuth/pkg/database"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/middleware"
 	"github.com/gin-gonic/gin"
-	"github.com/gocisse/sdwan-triage/pkg/database"
-	"github.com/gocisse/sdwan-triage/pkg/middleware"
 )
 
 // handleLogin returns a Gin handler for POST /api/login.

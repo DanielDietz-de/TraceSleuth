@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 )
 
 // CapacityMonitor detects capacity exhaustion patterns and provides early warnings

@@ -6,6 +6,10 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
 
 ## [Unreleased]
 
+### Changed (unreleased)
+
+- Replace inherited Go module path and all internal Go imports with the canonical TraceSleuth repository module. This is a source-consumer import migration; the CLI source directory and storage paths remain unchanged for now. See `docs/development/GO_MODULE_MIGRATION.md`.
+
 ### Planned
 
 - Complete remaining product-identity migration for inherited runtime source paths, frontend strings, API metadata, and configuration/storage names.

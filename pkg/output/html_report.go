@@ -13,7 +13,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gocisse/sdwan-triage/pkg/models"
+	"github.com/DanielDietz-de/TraceSleuth/pkg/models"
 )
 
 //go:embed assets/css/report.css

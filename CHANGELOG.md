@@ -34,6 +34,27 @@ TraceSleuth uses Semantic Versioning. The project has an independent version lin
 
 ### Review hardening
 
+- Reject zero-length non-terminating PCAPNG options before passing metadata to
+  the pinned parser, preventing stale option-buffer data from being retained
+  across interfaces and amplified in JSON output.
+- Accept at most 4 KiB of zero padding after PCAPNG option terminators and
+  inspect it in bounded chunks, avoiding per-four-byte filesystem operations
+  and adversarial preflight CPU exhaustion. Strict metadata parsing can reject
+  previously tolerated, nonconforming captures.
+- Cap all PCAPNG metadata options cumulatively at 2 MiB / 32,768 TLVs
+  and all non-packet blocks at 32,768; these explicit pre-production parser
+  budgets prevent small metadata-only captures from causing millions of
+  decoder/syscall iterations. Over-budget captures now fail closed.
+- Limit both working-copy and source hash verification to one byte beyond the
+  frozen snapshot size, preventing unbounded reads of a growing source.
+- Reject zero-captured-length packet records in classic PCAP and PCAPNG rather
+  than counting them as diagnostic evidence or granting protocol capabilities.
+- Preserve the highest known interface drop counter across all PCAPNG
+  statistics blocks, even if later blocks omit the counter.
+- Ensure CLI configuration, processing, integrity and JSON encoding failures
+  remove the private capture snapshot before process exit.
+- Enforce finite PCAPNG section lengths and reject malformed section extents;
+  bound per-field and total retained interface metadata before decoding.
 - Pin preflight and detector processing to one open capture descriptor,
   verifying the SHA-256 identity before and after packet analysis to reject
   captures modified in place or replaced between passes.

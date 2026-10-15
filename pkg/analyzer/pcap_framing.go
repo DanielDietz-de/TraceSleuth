@@ -61,7 +61,7 @@ func validateClassicPCAPFraming(file *os.File) (int64, error) {
 		}
 		captured := uint64(order.Uint32(record[8:12]))
 		original := uint64(order.Uint32(record[12:16]))
-		if captured > maxPCAPNGPacketBytes || captured > original ||
+		if captured == 0 || captured > maxPCAPNGPacketBytes || captured > original ||
 			(snaplen != 0 && captured > snaplen) ||
 			captured > uint64(size-offset-16) {
 			return 0, &MalformedCaptureRecordError{Index: packetIndex, Cause: fmt.Errorf("invalid classic PCAP capture length at byte %d: captured=%d original=%d", offset, captured, original)}
